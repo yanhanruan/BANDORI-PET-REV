@@ -131,17 +131,18 @@ class NavButton(QPushButton):
 
     def _update_stylesheet(self):
         dark = isDarkTheme()
-        bg = "#2a2a2a" if dark else "#f5f5f5"
-        hover_bg = "#3a3a3a" if dark else "#e8f0fe"
+        bg = "#2a2a2a" if dark else "#fafafa"
+        hover_bg = "#3a3a3a" if dark else "#e0e7f0"
         checked_bg = "#3a3a5a" if dark else "#d1e4ff"
         checked_border = "#60cdff"
-        text_color = "#e0e0e0" if dark else "#333333"
-        checked_text = "#ffffff" if dark else "#1a73e8"
+        text_color = "#e0e0e0" if dark else "#2a2a2a"
+        checked_text = "#ffffff" if dark else "#0d5ec9"
+        border = "1px solid transparent" if dark else "1px solid #e0e0e0"
         self.setStyleSheet(f"""
             QPushButton {{
                 text-align: left;
                 padding: 8px 14px;
-                border: none;
+                border: {border};
                 border-radius: 8px;
                 background: {bg};
                 font-size: 14px;
@@ -304,11 +305,11 @@ class SettingsWindow(QWidget):
         layout.addStretch()
 
         dark = isDarkTheme()
-        sidebar_bg = "#1a1a1a" if dark else "#f0f0f0"
+        sidebar_bg = "#181818" if dark else "#f5f6f8"
         sidebar.setStyleSheet(f"""
             #sidebar {{
                 background: {sidebar_bg};
-                border-right: 1px solid {'#333333' if dark else '#e0e0e0'};
+                border-right: 1px solid {'#404040' if dark else '#d5d5d5'};
             }}
         """)
         self._theme_widgets.append(sidebar)
@@ -455,12 +456,20 @@ class SettingsWindow(QWidget):
         self._llm_model_combo_label.hide()
         layout.addWidget(self._llm_model_combo_label)
 
+        self._llm_model_scroll = ScrollArea()
+        self._llm_model_scroll.setWidgetResizable(True)
+        self._llm_model_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._llm_model_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._llm_model_scroll.setMinimumHeight(80)
+        self._llm_model_scroll.setMaximumHeight(220)
+        self._llm_model_scroll.hide()
+
         self._llm_model_list = QWidget(page)
         self._llm_model_list_layout = QVBoxLayout(self._llm_model_list)
-        self._llm_model_list_layout.setContentsMargins(0, 0, 0, 0)
-        self._llm_model_list_layout.setSpacing(4)
-        self._llm_model_list.hide()
-        layout.addWidget(self._llm_model_list)
+        self._llm_model_list_layout.setContentsMargins(0, 4, 0, 4)
+        self._llm_model_list_layout.setSpacing(2)
+        self._llm_model_scroll.setWidget(self._llm_model_list)
+        layout.addWidget(self._llm_model_scroll)
 
         layout.addStretch()
 
@@ -488,9 +497,9 @@ class SettingsWindow(QWidget):
 
     def _style_llm_inputs(self):
         dark = isDarkTheme()
-        input_bg = "#2d2d2d" if dark else "#ffffff"
-        input_border = "#555555" if dark else "#d0d0d0"
-        text_color = "#ffffff" if dark else "#000000"
+        input_bg = "#282828" if dark else "#ffffff"
+        input_border = "#505050" if dark else "#d0d0d0"
+        text_color = "#e8e8e8" if dark else "#000000"
         style = f"""
             QLineEdit {{
                 background: {input_bg};
@@ -608,28 +617,31 @@ class SettingsWindow(QWidget):
             if item and item.widget():
                 item.widget().deleteLater()
 
+        dark = isDarkTheme()
         for model_name in models:
             btn = QPushButton(model_name, self._llm_model_list)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(30)
+            btn.setFixedHeight(34)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     text-align: left;
-                    padding: 4px 10px;
+                    padding: 6px 14px;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     background: transparent;
-                    color: {'#e0e0e0' if isDarkTheme() else '#333333'};
+                    font-size: 13px;
+                    color: {'#e8e8e8' if dark else '#333333'};
                 }}
                 QPushButton:hover {{
-                    background: {'#3a3a3a' if isDarkTheme() else '#e8f0fe'};
+                    background: {'#3a3a5a' if dark else '#e8f0fe'};
                 }}
             """)
             btn.clicked.connect(lambda checked, mn=model_name: self._llm_model_id.setText(mn))
             self._llm_model_list_layout.addWidget(btn)
+        self._llm_model_list_layout.addStretch()
 
         self._llm_model_combo_label.show()
-        self._llm_model_list.show()
+        self._llm_model_scroll.show()
 
     def _build_side_panel(self):
         panel = self._make_theme_widget(QWidget())

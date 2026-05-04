@@ -19,12 +19,12 @@ from llm_manager import (
 
 
 _BG_LIGHT = "#ffffff"
-_BG_DARK = "#1e1e1e"
+_BG_DARK = "#181818"
 
-_USER_BUBBLE_LIGHT = "#d1e8ff"
+_USER_BUBBLE_LIGHT = "#cce0ff"
 _USER_BUBBLE_DARK = "#1e3a5f"
-_ASSIST_BUBBLE_LIGHT = "#f0f0f0"
-_ASSIST_BUBBLE_DARK = "#2a2a2a"
+_ASSIST_BUBBLE_LIGHT = "#e8e8ec"
+_ASSIST_BUBBLE_DARK = "#333333"
 
 
 def _theme_color(key: str) -> QColor:
@@ -49,10 +49,12 @@ class MessageBubble(QWidget):
         layout.setContentsMargins(8, 2, 8, 2)
         layout.setSpacing(0)
 
+        dark = isDarkTheme()
         self._label = QLabel(self._text, self)
         self._label.setWordWrap(True)
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._label.setStyleSheet(f"color: {'#ffffff' if dark else '#1a1a1a'};")
         font = QFont()
         font.setPointSize(10)
         self._label.setFont(font)
@@ -242,12 +244,12 @@ class ChatWindow(QWidget):
     def _apply_theme(self):
         dark = isDarkTheme()
         bg = _BG_DARK if dark else _BG_LIGHT
-        border = "#3a3a3a" if dark else "#e0e0e0"
-        input_bg = "#2d2d2d" if dark else "#f5f5f5"
-        input_border = "#555555" if dark else "#d0d0d0"
+        border = "#404040" if dark else "#c8c8cc"
+        input_bg = "#2a2a2a" if dark else "#f0f0f0"
+        input_border = "#555555" if dark else "#c5c5c5"
         text_color = "#ffffff" if dark else "#000000"
-        title_bg = "#252525" if dark else "#fafafa"
-        title_border = "#3a3a3a" if dark else "#e8e8e8"
+        title_bg = "#202020" if dark else "#f5f5f5"
+        title_border = "#404040" if dark else "#d5d5d5"
 
         self.setStyleSheet(f"""
             ChatWindow {{
@@ -298,7 +300,7 @@ class ChatWindow(QWidget):
                 width: 6px;
             }}
             QScrollBar::handle:vertical {{
-                background: {'#555555' if dark else '#c0c0c0'};
+                background: {'#5a5a5a' if dark else '#c0c0c0'};
                 border-radius: 3px;
                 min-height: 30px;
             }}
