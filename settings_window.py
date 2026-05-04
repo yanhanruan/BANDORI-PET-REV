@@ -184,8 +184,8 @@ class SettingsWindow(QWidget):
         self._current_page = "characters"
 
         self.setWindowTitle("Bandori Desktop Pet - Settings")
-        self.setMinimumSize(1050, 560)
-        self.resize(1050, 600)
+        self.setMinimumSize(1050, 620)
+        self.resize(1050, 620)
 
         self._launched = False
         self._init_ui()
@@ -421,6 +421,44 @@ class SettingsWindow(QWidget):
         subtitle = SubtitleLabel("Configure the AI chat backend (OpenAI-compatible API)", page)
         layout.addWidget(subtitle)
 
+        profile_title = SubtitleLabel("My Profile", page)
+        layout.addWidget(profile_title)
+
+        name_label = BodyLabel("Display Name", page)
+        layout.addWidget(name_label)
+        self._user_name = QLineEdit(page)
+        self._user_name.setPlaceholderText("Your name (leave blank for default)")
+        self._user_name.setFixedHeight(36)
+        layout.addWidget(self._user_name)
+
+        avatar_label = BodyLabel("Avatar Color", page)
+        layout.addWidget(avatar_label)
+        self._avatar_colors = [
+            ("#2aabee", "Blue"),
+            ("#e91e63", "Pink"),
+            ("#9c27b0", "Purple"),
+            ("#4caf50", "Green"),
+            ("#ff9800", "Orange"),
+            ("#f44336", "Red"),
+            ("#00bcd4", "Cyan"),
+            ("#607d8b", "Grey"),
+        ]
+        colors_row = QHBoxLayout()
+        colors_row.setSpacing(6)
+        self._avatar_color_btns: list[QPushButton] = []
+        for color_hex, color_name in self._avatar_colors:
+            btn = QPushButton("", page)
+            btn.setFixedSize(28, 28)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(color_name)
+            btn.setProperty("avatar_color", color_hex)
+            btn.clicked.connect(lambda checked, b=btn: self._on_avatar_color_clicked(b))
+            self._avatar_color_btns.append(btn)
+            colors_row.addWidget(btn)
+        colors_row.addStretch()
+        layout.addLayout(colors_row)
+
         api_url_label = BodyLabel("API URL", page)
         layout.addWidget(api_url_label)
         self._llm_api_url = QLineEdit(page)
@@ -516,18 +554,54 @@ class SettingsWindow(QWidget):
         self._llm_api_url.setStyleSheet(style)
         self._llm_api_key.setStyleSheet(style)
         self._llm_model_id.setStyleSheet(style)
+        self._user_name.setStyleSheet(style)
+        self._style_avatar_buttons()
+
+    def _style_avatar_buttons(self):
+        for btn in self._avatar_color_btns:
+            color = btn.property("avatar_color")
+            checked = btn.isChecked()
+            btn.setText("\u2713" if checked else "")
+            size = 30 if checked else 28
+            btn.setFixedSize(size, size)
+            border = "3px solid #ffffff" if checked else "2px solid transparent"
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {color};
+                    border: {border};
+                    border-radius: {size // 2}px;
+                    color: #ffffff;
+                    font-weight: 900;
+                    font-size: 14px;
+                }}
+            """)
+
+    def _on_avatar_color_clicked(self, btn: QPushButton):
+        for b in self._avatar_color_btns:
+            b.setChecked(False)
+        btn.setChecked(True)
+        self._style_avatar_buttons()
 
     def _load_llm_config(self):
         if self._cfg:
             self._llm_api_url.setText(self._cfg.get("llm_api_url", ""))
             self._llm_api_key.setText(self._cfg.get("llm_api_key", ""))
             self._llm_model_id.setText(self._cfg.get("llm_model_id", ""))
+            self._user_name.setText(self._cfg.get("user_name", ""))
+            saved_color = self._cfg.get("user_avatar_color", "#2aabee")
+            for btn in self._avatar_color_btns:
+                btn.setChecked(btn.property("avatar_color") == saved_color)
 
     def _save_llm_config(self):
         if self._cfg:
             self._cfg.set("llm_api_url", self._llm_api_url.text().strip())
             self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
             self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
+            self._cfg.set("user_name", self._user_name.text().strip())
+            for btn in self._avatar_color_btns:
+                if btn.isChecked():
+                    self._cfg.set("user_avatar_color", btn.property("avatar_color"))
+                    break
             try:
                 self._cfg.save()
                 InfoBar.success(

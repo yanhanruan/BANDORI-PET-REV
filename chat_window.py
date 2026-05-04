@@ -194,12 +194,13 @@ class ConversationHistoryRow(QWidget):
 
 
 class MessageBubble(QWidget):
-    def __init__(self, text: str, role: str, author: str = "", created_at: str = "", parent=None):
+    def __init__(self, text: str, role: str, author: str = "", created_at: str = "", parent=None, avatar_color: str = ""):
         super().__init__(parent)
         self._text = text
         self._role = role
         self._author = author or ("You" if role == "user" else "Assistant")
         self._created_at = created_at
+        self._avatar_color = avatar_color
         self._streaming = False
         self._dot_step = 0
         self._typing_timer = QTimer(self)
@@ -275,10 +276,8 @@ class MessageBubble(QWidget):
         return w
 
     def _initials(self) -> str:
-        if self._role == "user":
-            return "U"
         text = self._author.strip()
-        return text[:1].upper() if text else "A"
+        return text[:1].upper() if text else ("U" if self._role == "user" else "A")
 
     def _meta_text(self) -> str:
         if not self._created_at:
@@ -310,7 +309,7 @@ class MessageBubble(QWidget):
         text = "#f7f7fb" if dark else "#1f2328"
         meta = "#a9b0c3" if dark else "#657089"
         stream = "#82cfff" if dark else "#5470c6"
-        avatar_bg = _TELEGRAM_ACCENT if user else _TEAMS_ACCENT
+        avatar_bg = self._avatar_color if user and self._avatar_color else _TELEGRAM_ACCENT if user else _TEAMS_ACCENT
         avatar_text = "#ffffff"
         self._label.setStyleSheet(f"color: {text}; background: transparent;")
         self._meta.setAlignment(Qt.AlignmentFlag.AlignRight if user else Qt.AlignmentFlag.AlignLeft)
@@ -368,6 +367,8 @@ class ChatWindow(QWidget):
         self._composer_colors = {}
 
         self._display_name = model_manager.get_display_name(character)
+        self._user_name = self._cfg.get("user_name", "").strip() if self._cfg else ""
+        self._user_avatar_color = self._cfg.get("user_avatar_color", _TELEGRAM_ACCENT) if self._cfg else _TELEGRAM_ACCENT
 
         from database_manager import DatabaseManager
         self._db = DatabaseManager()
@@ -846,8 +847,9 @@ class ChatWindow(QWidget):
         if stretch:
             del stretch
         for m in messages:
-            author = self.tr("You") if m["role"] == "user" else self._display_name
-            bubble = MessageBubble(m["content"], m["role"], author, m.get("created_at", ""))
+            author = self._user_name if m["role"] == "user" and self._user_name else self.tr("You") if m["role"] == "user" else self._display_name
+            avatar = self._user_avatar_color if m["role"] == "user" else ""
+            bubble = MessageBubble(m["content"], m["role"], author, m.get("created_at", ""), avatar_color=avatar)
             self._msg_layout.addWidget(bubble)
         self._msg_layout.addStretch()
         QTimer.singleShot(50, self._scroll_to_bottom)
@@ -876,7 +878,7 @@ class ChatWindow(QWidget):
         self._stream_buffer = ""
         self._visible_stream_text = ""
 
-        user_bubble = MessageBubble(text, "user", self.tr("You"))
+        user_bubble = MessageBubble(text, "user", self._user_name or self.tr("You"), avatar_color=self._user_avatar_color)
         self._msg_layout.insertWidget(self._msg_layout.count() - 1, user_bubble)
 
         assist_bubble = MessageBubble("", "assistant", self._display_name)

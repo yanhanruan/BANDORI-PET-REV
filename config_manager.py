@@ -18,6 +18,8 @@ DEFAULTS = {
     "llm_api_url": "",
     "llm_api_key": "",
     "llm_model_id": "",
+    "user_name": "",
+    "user_avatar_color": "#2aabee",
 }
 
 
