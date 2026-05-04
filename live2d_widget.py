@@ -1,3 +1,4 @@
+import math
 import OpenGL.GL as gl
 from PySide6.QtCore import Qt, QTimerEvent, QPoint
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat
@@ -103,8 +104,19 @@ class Live2DWidget(QOpenGLWidget):
         if not self._dragging and self._model:
             global_pos = QCursor.pos()
             widget_origin = self.mapToGlobal(QPoint(0, 0))
-            local_x = global_pos.x() - widget_origin.x()
-            local_y = global_pos.y() - widget_origin.y()
+            cx = widget_origin.x() + self.width() / 2
+            cy = widget_origin.y() + self.height() / 2
+            dx = global_pos.x() - cx
+            dy = global_pos.y() - cy
+            dist = math.sqrt(dx * dx + dy * dy)
+            max_dist = 600.0
+            norm = math.tanh(dist / max_dist)
+            ux = (dx / dist) * norm if dist > 0 else 0
+            uy = (dy / dist) * norm if dist > 0 else 0
+            scaled_x = cx + ux * max_dist
+            scaled_y = cy + uy * max_dist
+            local_x = scaled_x - widget_origin.x()
+            local_y = scaled_y - widget_origin.y()
             self._model.Drag(local_x, local_y)
         self.update()
 
