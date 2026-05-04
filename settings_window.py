@@ -244,8 +244,8 @@ class SettingsWindow(QWidget):
         self._current_page = "characters"
 
         self.setWindowTitle("Bandori Desktop Pet - Settings")
-        self.setMinimumSize(1050, 620)
-        self.resize(1050, 620)
+        self.setMinimumSize(1050, 650)
+        self.resize(1050, 650)
 
         self._launched = False
         self._init_ui()
