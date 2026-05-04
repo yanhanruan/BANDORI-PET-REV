@@ -198,7 +198,7 @@ class PetWindow(QWidget):
         pass
 
     def _on_radial_costume(self):
-        self._open_settings()
+        self._open_settings(start_on_costumes=True)
 
     def _on_radial_motion(self):
         model = self._live2d_widget.model
@@ -229,7 +229,7 @@ class PetWindow(QWidget):
         else:
             self.show()
 
-    def _open_settings(self):
+    def _open_settings(self, start_on_costumes=False):
         if self._settings_window is not None and self._settings_window.isVisible():
             self._settings_window.raise_()
             self._settings_window.activateWindow()
@@ -242,6 +242,7 @@ class PetWindow(QWidget):
             current_fps=self._fps,
             current_opacity=self._opacity,
             show_launch=False,
+            start_on_costumes=start_on_costumes,
         )
         self._settings_window.model_selected.connect(self._switch_model)
         self._settings_window.settings_changed.connect(self._apply_settings)

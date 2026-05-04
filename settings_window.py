@@ -115,7 +115,8 @@ class SettingsWindow(QWidget):
     launch_requested = Signal()
 
     def __init__(self, model_manager, current_char="", current_costume="",
-                 current_fps=120, current_opacity=1.0, show_launch=True):
+                 current_fps=120, current_opacity=1.0, show_launch=True,
+                 start_on_costumes=False):
         super().__init__()
         self._model_manager = model_manager
         self._current_char = current_char or model_manager.characters[0]
@@ -125,6 +126,7 @@ class SettingsWindow(QWidget):
         self._costume_buttons: list[CostumeItem] = []
         self._selected_costume = ""
         self._show_launch = show_launch
+        self._start_on_costumes = start_on_costumes
         self._theme_widgets: list[QWidget] = []
 
         self.setWindowTitle("Bandori Desktop Pet - Settings")
@@ -140,6 +142,14 @@ class SettingsWindow(QWidget):
             self._selected_costume = self._model_manager.get_default_costume(
                 self._current_char
             )
+
+        if self._start_on_costumes:
+            self._populate_costumes(self._current_char)
+            display = self._model_manager.get_display_name(self._current_char)
+            self._costume_title.setText(f"Costumes - {display}")
+            self._costume_subtitle.setText(f"Select a costume for {display}")
+            self._char_page.hide()
+            self._costume_page.show()
 
     def closeEvent(self, event):
         if not self._launched:
