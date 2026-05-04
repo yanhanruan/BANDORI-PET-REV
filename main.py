@@ -91,6 +91,7 @@ def main():
         if x >= 0 and y >= 0:
             pet.resize(w, h)
             pet.move(x, y)
+            pet._show_pos_set = True
         pet.show()
         pet_window_ref["window"] = pet
 

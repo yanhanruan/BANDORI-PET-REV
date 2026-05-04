@@ -32,6 +32,7 @@ class PetWindow(QWidget):
         self._settings_window = None
         self._cfg = config_manager
         self._radial_menu = None
+        self._show_pos_set = False
 
         self._init_ui()
         self._init_tray()
@@ -312,6 +313,8 @@ class PetWindow(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if self._show_pos_set:
+            return
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
