@@ -15,6 +15,9 @@ DEFAULTS = {
     "window_y": -1,
     "window_width": 400,
     "window_height": 500,
+    "llm_api_url": "",
+    "llm_api_key": "",
+    "llm_model_id": "",
 }
 
 

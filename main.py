@@ -105,6 +105,7 @@ def main():
         current_fps=cfg.get("fps", 120),
         current_opacity=cfg.get("opacity", 1.0),
         show_launch=True,
+        config_manager=cfg,
     )
     if cfg.get("dark_theme", False):
         settings._theme_switch.setChecked(True)

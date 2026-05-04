@@ -1,18 +1,20 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
     QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
+    QLineEdit,
 )
 
 from qfluentwidgets import (
     CardWidget, PushButton, PrimaryPushButton,
     BodyLabel, StrongBodyLabel, TitleLabel, SubtitleLabel,
     FluentIcon, Slider, SwitchButton, ScrollArea,
-    setTheme, Theme, isDarkTheme,
+    setTheme, Theme, isDarkTheme, InfoBar, InfoBarPosition,
 )
 from qfluentwidgets.common.config import qconfig
 
+import json
 
 _BG_LIGHT = "#ffffff"
 _BG_DARK = "#1e1e1e"
@@ -109,6 +111,53 @@ class CostumeItem(QPushButton):
         return self._costume_id
 
 
+class NavButton(QPushButton):
+    nav_activated = Signal(str)
+
+    def __init__(self, nav_key: str, icon, text: str, parent=None):
+        super().__init__(parent)
+        self._nav_key = nav_key
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(44)
+        if hasattr(icon, 'icon'):
+            self.setIcon(icon.icon())
+        else:
+            self.setIcon(icon)
+        self.setText(f"  {text}")
+        self.setCheckable(True)
+        self._update_stylesheet()
+        qconfig.themeChanged.connect(self._update_stylesheet)
+        self.clicked.connect(lambda: self.nav_activated.emit(self._nav_key))
+
+    def _update_stylesheet(self):
+        dark = isDarkTheme()
+        bg = "#2a2a2a" if dark else "#f5f5f5"
+        hover_bg = "#3a3a3a" if dark else "#e8f0fe"
+        checked_bg = "#3a3a5a" if dark else "#d1e4ff"
+        checked_border = "#60cdff"
+        text_color = "#e0e0e0" if dark else "#333333"
+        checked_text = "#ffffff" if dark else "#1a73e8"
+        self.setStyleSheet(f"""
+            QPushButton {{
+                text-align: left;
+                padding: 8px 14px;
+                border: none;
+                border-radius: 8px;
+                background: {bg};
+                font-size: 14px;
+                color: {text_color};
+            }}
+            QPushButton:hover {{
+                background: {hover_bg};
+            }}
+            QPushButton:checked {{
+                background: {checked_bg};
+                color: {checked_text};
+                border-left: 3px solid {checked_border};
+            }}
+        """)
+
+
 class SettingsWindow(QWidget):
     model_selected = Signal(str, str)
     settings_changed = Signal(dict)
@@ -116,7 +165,7 @@ class SettingsWindow(QWidget):
 
     def __init__(self, model_manager, current_char="", current_costume="",
                  current_fps=120, current_opacity=1.0, show_launch=True,
-                 start_on_costumes=False):
+                 start_on_costumes=False, config_manager=None):
         super().__init__()
         self._model_manager = model_manager
         self._current_char = current_char or model_manager.characters[0]
@@ -128,10 +177,14 @@ class SettingsWindow(QWidget):
         self._show_launch = show_launch
         self._start_on_costumes = start_on_costumes
         self._theme_widgets: list[QWidget] = []
+        self._cfg = config_manager
+        self._pages: dict[str, QWidget] = {}
+        self._nav_buttons: dict[str, NavButton] = {}
+        self._current_page = "characters"
 
         self.setWindowTitle("Bandori Desktop Pet - Settings")
-        self.setMinimumSize(700, 560)
-        self.resize(890, 600)
+        self.setMinimumSize(1050, 560)
+        self.resize(1050, 600)
 
         self._launched = False
         self._init_ui()
@@ -142,6 +195,8 @@ class SettingsWindow(QWidget):
             self._selected_costume = self._model_manager.get_default_costume(
                 self._current_char
             )
+
+        self._nav_buttons["characters"].setChecked(True)
 
         if self._start_on_costumes:
             self._populate_costumes(self._current_char)
@@ -154,7 +209,16 @@ class SettingsWindow(QWidget):
     def closeEvent(self, event):
         if not self._launched:
             self._on_apply()
+        self._save_llm_config()
+        self._cleanup_workers()
         super().closeEvent(event)
+
+    def _cleanup_workers(self):
+        for attr in ('_test_worker', '_fetch_worker'):
+            worker = getattr(self, attr, None)
+            if worker is not None and worker.isRunning():
+                worker.quit()
+                worker.wait(2000)
 
     def _make_theme_widget(self, w: QWidget) -> QWidget:
         w.setAutoFillBackground(True)
@@ -177,25 +241,89 @@ class SettingsWindow(QWidget):
         qconfig.themeChanged.connect(self._update_all_theme_bgs)
 
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(24, 20, 24, 20)
-        main_layout.setSpacing(24)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        self._stack = self._make_theme_widget(QWidget(self))
-        self._stack_layout = QVBoxLayout(self._stack)
-        self._stack_layout.setContentsMargins(0, 0, 0, 0)
-        self._stack_layout.setSpacing(0)
+        sidebar = self._build_sidebar()
+        main_layout.addWidget(sidebar, 0)
+
+        right_area = QWidget()
+        right_layout = QHBoxLayout(right_area)
+        right_layout.setContentsMargins(16, 16, 16, 16)
+        right_layout.setSpacing(16)
+
+        self._page_stack = self._make_theme_widget(QWidget())
+        self._page_stack_layout = QVBoxLayout(self._page_stack)
+        self._page_stack_layout.setContentsMargins(0, 0, 0, 0)
+        self._page_stack_layout.setSpacing(0)
 
         self._char_page = self._build_char_page()
         self._costume_page = self._build_costume_page()
+        self._llm_page = self._build_llm_page()
         self._costume_page.hide()
+        self._llm_page.hide()
 
-        self._stack_layout.addWidget(self._char_page)
-        self._stack_layout.addWidget(self._costume_page)
+        self._page_stack_layout.addWidget(self._char_page)
+        self._page_stack_layout.addWidget(self._costume_page)
+        self._page_stack_layout.addWidget(self._llm_page)
+
+        self._pages["characters"] = self._char_page
+        self._pages["costumes"] = self._costume_page
+        self._pages["llm"] = self._llm_page
 
         side_panel = self._build_side_panel()
 
-        main_layout.addWidget(self._stack, 1)
-        main_layout.addWidget(side_panel, 0)
+        right_layout.addWidget(self._page_stack, 1)
+        right_layout.addWidget(side_panel, 0)
+
+        main_layout.addWidget(right_area, 1)
+
+    def _build_sidebar(self):
+        sidebar = QWidget()
+        sidebar.setFixedWidth(180)
+        sidebar.setObjectName("sidebar")
+
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(8, 12, 8, 12)
+        layout.setSpacing(4)
+
+        title = StrongBodyLabel("Navigation", sidebar)
+        title.setContentsMargins(12, 4, 0, 8)
+        layout.addWidget(title)
+
+        btn_chars = NavButton("characters", FluentIcon.EMOJI_TAB_SYMBOLS, "Characters", sidebar)
+        btn_chars.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["characters"] = btn_chars
+        layout.addWidget(btn_chars)
+
+        btn_llm = NavButton("llm", FluentIcon.ROBOT, "LLM Config", sidebar)
+        btn_llm.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["llm"] = btn_llm
+        layout.addWidget(btn_llm)
+
+        layout.addStretch()
+
+        dark = isDarkTheme()
+        sidebar_bg = "#1a1a1a" if dark else "#f0f0f0"
+        sidebar.setStyleSheet(f"""
+            #sidebar {{
+                background: {sidebar_bg};
+                border-right: 1px solid {'#333333' if dark else '#e0e0e0'};
+            }}
+        """)
+        self._theme_widgets.append(sidebar)
+
+        return sidebar
+
+    def _on_nav_selected(self, nav_key: str):
+        for key, btn in self._nav_buttons.items():
+            btn.setChecked(key == nav_key)
+        for key, page in self._pages.items():
+            if key.endswith("costumes"):
+                continue
+            page.setVisible(key == nav_key)
+        self._costume_page.hide()
+        self._current_page = nav_key
 
     def _build_char_page(self):
         page = self._make_theme_widget(QWidget())
@@ -281,6 +409,228 @@ class SettingsWindow(QWidget):
         layout.addWidget(scroll, 1)
         return page
 
+    def _build_llm_page(self):
+        page = self._make_theme_widget(QWidget())
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        title = TitleLabel("LLM Configuration", page)
+        layout.addWidget(title)
+        subtitle = SubtitleLabel("Configure the AI chat backend (OpenAI-compatible API)", page)
+        layout.addWidget(subtitle)
+
+        api_url_label = BodyLabel("API URL", page)
+        layout.addWidget(api_url_label)
+        self._llm_api_url = QLineEdit(page)
+        self._llm_api_url.setPlaceholderText("https://api.openai.com/v1/chat/completions")
+        self._llm_api_url.setFixedHeight(36)
+        layout.addWidget(self._llm_api_url)
+
+        api_key_label = BodyLabel("API Key", page)
+        layout.addWidget(api_key_label)
+        self._llm_api_key = QLineEdit(page)
+        self._llm_api_key.setPlaceholderText("sk-...")
+        self._llm_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._llm_api_key.setFixedHeight(36)
+        layout.addWidget(self._llm_api_key)
+
+        model_label = BodyLabel("Model ID", page)
+        layout.addWidget(model_label)
+
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+        self._llm_model_id = QLineEdit(page)
+        self._llm_model_id.setPlaceholderText("gpt-4o")
+        self._llm_model_id.setFixedHeight(36)
+        model_row.addWidget(self._llm_model_id)
+
+        fetch_btn = PushButton(FluentIcon.SYNC, "Fetch", page)
+        fetch_btn.setFixedHeight(36)
+        fetch_btn.clicked.connect(self._fetch_models)
+        model_row.addWidget(fetch_btn)
+        layout.addLayout(model_row)
+
+        self._llm_model_combo_label = BodyLabel("Available Models:", page)
+        self._llm_model_combo_label.hide()
+        layout.addWidget(self._llm_model_combo_label)
+
+        self._llm_model_list = QWidget(page)
+        self._llm_model_list_layout = QVBoxLayout(self._llm_model_list)
+        self._llm_model_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._llm_model_list_layout.setSpacing(4)
+        self._llm_model_list.hide()
+        layout.addWidget(self._llm_model_list)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        test_btn = PushButton(FluentIcon.WIFI, "Test Connection", page)
+        test_btn.setFixedHeight(36)
+        test_btn.clicked.connect(self._test_connection)
+        btn_row.addWidget(test_btn)
+
+        save_btn = PrimaryPushButton(FluentIcon.SAVE, "Save", page)
+        save_btn.setFixedHeight(36)
+        save_btn.clicked.connect(self._save_llm_config)
+        btn_row.addWidget(save_btn)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        self._load_llm_config()
+        self._style_llm_inputs()
+        qconfig.themeChanged.connect(self._style_llm_inputs)
+
+        return page
+
+    def _style_llm_inputs(self):
+        dark = isDarkTheme()
+        input_bg = "#2d2d2d" if dark else "#ffffff"
+        input_border = "#555555" if dark else "#d0d0d0"
+        text_color = "#ffffff" if dark else "#000000"
+        style = f"""
+            QLineEdit {{
+                background: {input_bg};
+                color: {text_color};
+                border: 1px solid {input_border};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: #60cdff;
+            }}
+        """
+        self._llm_api_url.setStyleSheet(style)
+        self._llm_api_key.setStyleSheet(style)
+        self._llm_model_id.setStyleSheet(style)
+
+    def _load_llm_config(self):
+        if self._cfg:
+            self._llm_api_url.setText(self._cfg.get("llm_api_url", ""))
+            self._llm_api_key.setText(self._cfg.get("llm_api_key", ""))
+            self._llm_model_id.setText(self._cfg.get("llm_model_id", ""))
+
+    def _save_llm_config(self):
+        if self._cfg:
+            self._cfg.set("llm_api_url", self._llm_api_url.text().strip())
+            self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
+            self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
+            try:
+                self._cfg.save()
+                InfoBar.success(
+                    "Saved",
+                    "LLM configuration saved successfully.",
+                    duration=2000,
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+            except Exception:
+                pass
+
+    def _test_connection(self):
+        api_url = self._llm_api_url.text().strip()
+        api_key = self._llm_api_key.text().strip()
+        model_id = self._llm_model_id.text().strip()
+
+        if not api_url or not api_key or not model_id:
+            InfoBar.warning(
+                "Missing Config",
+                "Please fill in all fields before testing.",
+                duration=2000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        if hasattr(self, '_test_worker') and self._test_worker is not None:
+            if self._test_worker.isRunning():
+                self._test_worker.quit()
+                self._test_worker.wait(2000)
+
+        self._test_worker = TestConnectionWorker(api_url, api_key, model_id, parent=self)
+        self._test_worker.finished.connect(self._on_test_finished)
+        self._test_worker.error.connect(self._on_test_error)
+        self._test_worker.start()
+
+    def _on_test_finished(self):
+        InfoBar.success(
+            "Connected",
+            "LLM API connection test successful!",
+            duration=2000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_test_error(self, msg: str):
+        InfoBar.error(
+            "Connection Failed",
+            msg,
+            duration=3000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _fetch_models(self):
+        api_url = self._llm_api_url.text().strip()
+        api_key = self._llm_api_key.text().strip()
+
+        if not api_url or not api_key:
+            InfoBar.warning(
+                "Missing Config",
+                "Please fill in API URL and API Key first.",
+                duration=2000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        base_url = api_url.rstrip("/")
+        base_url = base_url.rsplit("/chat/completions", 1)[0]
+        models_url = base_url + "/models"
+
+        if hasattr(self, '_fetch_worker') and self._fetch_worker is not None:
+            if self._fetch_worker.isRunning():
+                self._fetch_worker.quit()
+                self._fetch_worker.wait(2000)
+
+        self._fetch_worker = FetchModelsWorker(models_url, api_key, parent=self)
+        self._fetch_worker.finished.connect(self._on_models_fetched)
+        self._fetch_worker.error.connect(self._on_test_error)
+        self._fetch_worker.start()
+
+    def _on_models_fetched(self, models: list[str]):
+        for i in range(self._llm_model_list_layout.count()):
+            item = self._llm_model_list_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        for model_name in models:
+            btn = QPushButton(model_name, self._llm_model_list)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(30)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left;
+                    padding: 4px 10px;
+                    border: none;
+                    border-radius: 4px;
+                    background: transparent;
+                    color: {'#e0e0e0' if isDarkTheme() else '#333333'};
+                }}
+                QPushButton:hover {{
+                    background: {'#3a3a3a' if isDarkTheme() else '#e8f0fe'};
+                }}
+            """)
+            btn.clicked.connect(lambda checked, mn=model_name: self._llm_model_id.setText(mn))
+            self._llm_model_list_layout.addWidget(btn)
+
+        self._llm_model_combo_label.show()
+        self._llm_model_list.show()
+
     def _build_side_panel(self):
         panel = self._make_theme_widget(QWidget())
         panel.setFixedWidth(220)
@@ -349,6 +699,7 @@ class SettingsWindow(QWidget):
         )
         self._char_page.hide()
         self._costume_page.show()
+        self._current_page = "costumes"
 
     def _populate_costumes(self, char_key: str):
         for btn in self._costume_buttons:
@@ -382,11 +733,15 @@ class SettingsWindow(QWidget):
     def _go_back_to_chars(self):
         self._costume_page.hide()
         self._char_page.show()
+        self._current_page = "characters"
+        for key, btn in self._nav_buttons.items():
+            btn.setChecked(key == "characters")
 
     def _on_apply(self):
         if self._launched:
             return
         self._launched = True
+        self._save_llm_config()
         if self._current_char and self._selected_costume:
             self.model_selected.emit(self._current_char, self._selected_costume)
         self.settings_changed.emit({
@@ -398,8 +753,98 @@ class SettingsWindow(QWidget):
             self.launch_requested.emit()
         self.close()
 
-    def closeEvent(self, event):
-        if not self._launched:
-            self._on_apply()
-            return
-        super().closeEvent(event)
+
+class TestConnectionWorker(QThread):
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, api_url: str, api_key: str, model_id: str, parent=None):
+        super().__init__(parent)
+        self._api_url = api_url.rstrip("/")
+        self._api_key = api_key
+        self._model_id = model_id
+
+    def run(self):
+        try:
+            import urllib.request
+            import json
+            import ssl
+
+            ctx = ssl.create_default_context()
+
+            body = json.dumps({
+                "model": self._model_id,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 5,
+            }).encode("utf-8")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._api_key}",
+            }
+
+            req = urllib.request.Request(
+                self._api_url, data=body, headers=headers, method="POST"
+            )
+
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                choices = data.get("choices", [])
+                if choices:
+                    self.finished.emit()
+                else:
+                    self.error.emit("Unexpected response format")
+        except urllib.error.HTTPError as e:
+            try:
+                err_body = json.loads(e.read().decode("utf-8"))
+                msg = err_body.get("error", {}).get("message", str(e))
+            except Exception:
+                msg = str(e)
+            self.error.emit(f"HTTP {e.code}: {msg}")
+        except urllib.error.URLError as e:
+            self.error.emit(f"Network error: {e.reason}")
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class FetchModelsWorker(QThread):
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, models_url: str, api_key: str, parent=None):
+        super().__init__(parent)
+        self._models_url = models_url
+        self._api_key = api_key
+
+    def run(self):
+        try:
+            import urllib.request
+            import json
+            import ssl
+
+            ctx = ssl.create_default_context()
+
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+            }
+
+            req = urllib.request.Request(
+                self._models_url, headers=headers, method="GET"
+            )
+
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = data.get("data", [])
+                ids = [m.get("id", "") for m in models if m.get("id")]
+                self.finished.emit(sorted(ids))
+        except urllib.error.HTTPError as e:
+            try:
+                err_body = json.loads(e.read().decode("utf-8"))
+                msg = err_body.get("error", {}).get("message", str(e))
+            except Exception:
+                msg = str(e)
+            self.error.emit(f"HTTP {e.code}: {msg}")
+        except urllib.error.URLError as e:
+            self.error.emit(f"Network error: {e.reason}")
+        except Exception as e:
+            self.error.emit(str(e))

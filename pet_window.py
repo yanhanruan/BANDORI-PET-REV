@@ -32,6 +32,7 @@ class PetWindow(QWidget):
         self._settings_window = None
         self._cfg = config_manager
         self._radial_menu = None
+        self._chat_window = None
         self._show_pos_set = False
 
         self._init_ui()
@@ -86,6 +87,9 @@ class PetWindow(QWidget):
 
         show_action = menu.addAction(self.tr("Show/Hide"))
         show_action.triggered.connect(self._toggle_visible)
+
+        chat_action = menu.addAction(self.tr("Chat..."))
+        chat_action.triggered.connect(self._open_chat)
 
         settings_action = menu.addAction(self.tr("Settings..."))
         settings_action.triggered.connect(self._open_settings)
@@ -195,7 +199,142 @@ class PetWindow(QWidget):
         self._radial_menu.show_at(QPoint(gx, gy))
 
     def _on_radial_chat(self):
-        pass
+        self._open_chat()
+
+    def _open_chat(self):
+        from chat_window import ChatWindow
+
+        if self._chat_window is not None and self._chat_window.isVisible():
+            self._chat_window.raise_()
+            self._chat_window.activateWindow()
+            return
+
+        self._chat_window = ChatWindow(
+            self._current_char,
+            self._model_manager,
+            self._live2d,
+            self._cfg,
+            parent_pet=self,
+        )
+        self._chat_window.action_triggered.connect(self._on_chat_action)
+        self._chat_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._chat_window.destroyed.connect(lambda: setattr(self, '_chat_window', None))
+        self._chat_window.show()
+        self._chat_window.position_next_to_pet(self)
+
+    def _on_chat_action(self, action_name: str):
+        model = self._live2d_widget.model
+        if model is None:
+            return
+
+        char_prefix = self._current_char if self._current_char else "anon"
+        normalized = action_name.strip().lower()
+
+        exp_names = list(model.expressions.keys()) if hasattr(model, 'expressions') else []
+        exp_map = {}
+        for ename in exp_names:
+            l = ename.lower()
+            if "_" in l:
+                exp_map[l] = ename
+
+        def _find_expression(tag: str) -> str | None:
+            tag_low = tag.lower()
+            if tag_low in exp_map:
+                return exp_map[tag_low]
+            prefix = f"{char_prefix}_{tag_low}"
+            for ename in exp_names:
+                if ename.lower().startswith(prefix):
+                    return ename
+            return None
+
+        try:
+            motion_names = list(model.modelSetting.getMotionNames())
+        except Exception:
+            motion_names = []
+
+        char_lower = char_prefix.lower()
+
+        def _find_motion(tag: str) -> str | None:
+            tag_low = tag.lower()
+            prefix = f"{char_lower}_{tag_low}"
+            matches = []
+            for mname in motion_names:
+                mlow = mname.lower()
+                if mlow.startswith(prefix):
+                    matches.append(mname)
+            if not matches:
+                for mname in motion_names:
+                    mlow = mname.lower()
+                    if char_lower in mlow and tag_low in mlow:
+                        matches.append(mname)
+            if matches:
+                import random
+                return random.choice(matches)
+            return None
+
+        tag_map = {
+            "angry": "angry",
+            "cry": "cry",
+            "bye": "bye",
+            "kandou": "kandou",
+            "smile": "smile",
+            "sad": "sad",
+            "surprised": "surprised",
+            "thinking": "thinking",
+            "shame": "shame",
+            "serious": "serious",
+            "wink": "wink",
+            "kime": "kime",
+            "nf": "nf",
+            "nnf": "nnf",
+            "scared": "scared",
+            "sleep": "sleep",
+            "sneeze": "sneeze",
+            "sing": "sing",
+            "sigh": "sigh",
+            "odoodo": "odoodo",
+            "eeto": "eeto",
+            "gattsu": "gattsu",
+            "jaan": "jaan",
+            "nekodere": "nekodere",
+            "pui": "pui",
+            "niya": "niya",
+            "ando": "ando",
+            "mitore": "mitore",
+            "nod": "nod",
+            "f": "f",
+        }
+
+        if "." in normalized:
+            base = normalized.rsplit(".", 1)[0]
+            exp = _find_expression(base)
+            if exp:
+                try:
+                    model.SetExpression(exp)
+                except Exception:
+                    pass
+            return
+
+        mapped = tag_map.get(normalized, normalized)
+
+        motion = _find_motion(mapped)
+        if motion:
+            try:
+                model.StartMotion(motion, 0, self._live2d.MotionPriority.FORCE)
+            except Exception:
+                try:
+                    model.StartRandomMotion(
+                        priority=self._live2d.MotionPriority.FORCE,
+                    )
+                except Exception:
+                    pass
+
+        exp = _find_expression(mapped)
+        if exp:
+            try:
+                model.SetExpression(exp)
+            except Exception:
+                pass
 
     def _on_radial_costume(self):
         self._open_settings(start_on_costumes=True)
@@ -243,6 +382,7 @@ class PetWindow(QWidget):
             current_opacity=self._opacity,
             show_launch=False,
             start_on_costumes=start_on_costumes,
+            config_manager=self._cfg,
         )
         self._settings_window.model_selected.connect(self._switch_model)
         self._settings_window.settings_changed.connect(self._apply_settings)
@@ -280,6 +420,11 @@ class PetWindow(QWidget):
             FluentIcon.SETTING,
             self.tr("Settings..."),
             triggered=self._open_settings,
+        )
+        menu.addAction(
+            FluentIcon.CHAT,
+            self.tr("Chat..."),
+            triggered=self._open_chat,
         )
         menu.addSeparator()
 
