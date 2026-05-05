@@ -79,7 +79,7 @@ class PetWindow(QWidget):
         self._motion_guard_token = 0
         self._mouse_passthrough = False
         self._passthrough_timer = QTimer(self)
-        self._passthrough_timer.setInterval(35)
+        self._passthrough_timer.setInterval(50)
         self._passthrough_timer.timeout.connect(self._update_mouse_passthrough)
 
         self._init_ui()
@@ -156,6 +156,8 @@ class PetWindow(QWidget):
 
     def _update_mouse_passthrough(self):
         if os.name != "nt" or not self.isVisible():
+            return
+        if self._live2d_widget._dragging:
             return
         global_pos = QCursor.pos()
         if not self.geometry().contains(global_pos):

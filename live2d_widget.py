@@ -1,4 +1,5 @@
 import math
+import time
 import OpenGL.GL as gl
 from PySide6.QtCore import Qt, QTimerEvent, QPoint
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat
@@ -22,6 +23,7 @@ class Live2DWidget(QOpenGLWidget):
         fmt = QSurfaceFormat()
         fmt.setAlphaBufferSize(8)
         fmt.setSamples(0)
+        fmt.setSwapInterval(0)
         QSurfaceFormat.setDefaultFormat(fmt)
 
         super().__init__(parent)
@@ -42,6 +44,14 @@ class Live2DWidget(QOpenGLWidget):
         self._vsync = True
         self._timer_id = None
 
+        self._last_frame_time = 0
+        self._frame_accum = 0.0
+        self._frame_count = 0
+        self._target_frame_ms = 0
+        self._skip_counter = 0
+        self._head_track_counter = 0
+        self._cached_cursor_pos = None
+
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
@@ -56,21 +66,28 @@ class Live2DWidget(QOpenGLWidget):
     def _restart_timer(self):
         if self._timer_id is not None:
             self.killTimer(self._timer_id)
-            self._timer_id = self.startTimer(int(1000 / self._effective_fps()))
+        eff = self._effective_fps()
+        self._target_frame_ms = 1000.0 / eff
+        self._timer_id = self.startTimer(int(self._target_frame_ms), Qt.TimerType.PreciseTimer)
 
     def set_fps(self, fps: int):
         self._fps = max(10, min(fps, 240))
-        if not self._vsync and self._timer_id is not None:
+        refresh = _get_display_refresh()
+        if self._vsync and self._fps > refresh:
+            self._vsync = False
+        if self._timer_id is not None:
             self._restart_timer()
 
     def set_vsync(self, enabled: bool):
         self._vsync = enabled
+        if self._vsync and self._fps > _get_display_refresh():
+            self._vsync = False
         if not self._initialized_gl:
             return
         self.makeCurrent()
         try:
             from OpenGL.WGL.EXT.swap_control import wglSwapIntervalEXT
-            wglSwapIntervalEXT(1 if enabled else 0)
+            wglSwapIntervalEXT(1 if self._vsync else 0)
         except Exception:
             pass
         self._restart_timer()
@@ -124,7 +141,7 @@ class Live2DWidget(QOpenGLWidget):
         self._initialized_gl = True
         if self._pending_model:
             self._load_model_internal(self._pending_model)
-        self._timer_id = self.startTimer(int(1000 / self._effective_fps()))
+        self._restart_timer()
 
     def resizeGL(self, w: int, h: int):
         gl.glViewport(0, 0, int(w * self._system_scale), int(h * self._system_scale))
@@ -132,32 +149,52 @@ class Live2DWidget(QOpenGLWidget):
             self._model.Resize(w, h)
 
     def paintGL(self):
-        if not self._live2d or not self._model:
+        model = self._model
+        live2d = self._live2d
+        if not live2d or not model:
             return
-        self._live2d.clearBuffer()
-        self._model.Update()
-        self._model.Draw()
+
+        now = time.perf_counter()
+        elapsed = (now - self._last_frame_time) * 1000.0
+        self._last_frame_time = now
+
+        self._frame_accum += elapsed
+        self._frame_count += 1
+        if self._frame_accum >= 1000.0:
+            self._frame_accum -= 1000.0
+            self._frame_count = 0
+
+        live2d.clearBuffer()
+        model.Update()
+        model.Draw()
 
     def timerEvent(self, event: QTimerEvent):
         if not self.isVisible():
             return
-        if not self._dragging and self._model:
-            global_pos = QCursor.pos()
-            widget_origin = self.mapToGlobal(QPoint(0, 0))
-            cx = widget_origin.x() + self.width() / 2
-            cy = widget_origin.y() + self.height() / 2
-            dx = global_pos.x() - cx
-            dy = global_pos.y() - cy
-            dist = math.sqrt(dx * dx + dy * dy)
-            max_dist = 600.0
-            norm = math.tanh(dist / max_dist)
-            ux = (dx / dist) * norm if dist > 0 else 0
-            uy = (dy / dist) * norm if dist > 0 else 0
-            scaled_x = cx + ux * max_dist
-            scaled_y = cy + uy * max_dist
-            local_x = scaled_x - widget_origin.x()
-            local_y = scaled_y - widget_origin.y()
-            self._model.Drag(local_x, local_y)
+
+        if not self._dragging and self._model is not None:
+            self._head_track_counter += 1
+            if self._head_track_counter >= 2:
+                self._head_track_counter = 0
+                global_pos = QCursor.pos()
+                widget_origin = self.mapToGlobal(QPoint(0, 0))
+                cx = widget_origin.x() + self.width() / 2
+                cy = widget_origin.y() + self.height() / 2
+                dx = global_pos.x() - cx
+                dy = global_pos.y() - cy
+                dist2 = dx * dx + dy * dy
+                if dist2 > 0:
+                    dist = math.sqrt(dist2)
+                    max_dist = 600.0
+                    norm = math.tanh(dist / max_dist)
+                    ux = (dx / dist) * norm
+                    uy = (dy / dist) * norm
+                    scaled_x = cx + ux * max_dist
+                    scaled_y = cy + uy * max_dist
+                    local_x = scaled_x - widget_origin.x()
+                    local_y = scaled_y - widget_origin.y()
+                    self._model.Drag(local_x, local_y)
+
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -204,7 +241,7 @@ class Live2DWidget(QOpenGLWidget):
         local = self.mapFromGlobal(global_pos)
         if not self.rect().contains(local):
             return 0
-        return self._get_alpha_at(local.x(), local.y())
+        return self._get_alpha_fast(local.x(), local.y())
 
     def is_model_hit_at_global(self, global_pos: QPoint) -> bool:
         local = self.mapFromGlobal(global_pos)
@@ -213,16 +250,17 @@ class Live2DWidget(QOpenGLWidget):
         return self._is_model_hit_at(local.x(), local.y())
 
     def _is_model_hit_at(self, x: float, y: float) -> bool:
-        if not self._model:
+        model = self._model
+        if not model:
             return False
         try:
-            if hasattr(self._model, "HitPart"):
-                return bool(self._model.HitPart(x, y, topOnly=True))
+            if hasattr(model, "HitPart"):
+                return bool(model.HitPart(x, y, topOnly=True))
         except Exception:
             pass
-        return self._get_alpha_at(x, y) > 8
+        return self._get_alpha_fast(x, y) > 8
 
-    def _get_alpha_at(self, x: float, y: float) -> int:
+    def _get_alpha_fast(self, x: float, y: float) -> int:
         try:
             if not self._initialized_gl or not self._model:
                 return 0
