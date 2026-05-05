@@ -488,9 +488,7 @@ class PetWindow(QWidget):
 
     def _on_motion_finished(self):
         self._motion_guard_token += 1
-        model = self._live2d_widget.model
-        if model is not None:
-            model.ClearMotions()
+        self._start_idle_motion()
 
     def _clear_motion_if_current(self, token: int):
         if token != self._motion_guard_token:
@@ -499,6 +497,31 @@ class PetWindow(QWidget):
         if model is not None:
             model.ClearMotions()
         self._motion_guard_token += 1
+        if model is not None:
+            QTimer.singleShot(0, self._start_idle_motion)
+
+    def _start_idle_motion(self):
+        model = self._live2d_widget.model
+        if model is None:
+            return
+        try:
+            model.StartIdleMotion()
+        except Exception:
+            pass
+        try:
+            default_exp = self._find_default_expression(model)
+            if default_exp:
+                model.SetExpression(default_exp)
+        except Exception:
+            pass
+
+    def _find_default_expression(self, model):
+        if not hasattr(model, 'expressions') or not model.expressions:
+            return None
+        for name in model.expressions:
+            if name.lower().endswith('_default') or name.lower() == 'default':
+                return name
+        return None
 
     def _on_lock_toggled(self, locked: bool):
         self._live2d_widget.set_drag_locked(locked)
