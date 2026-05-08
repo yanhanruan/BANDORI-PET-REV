@@ -674,6 +674,8 @@ class PetWindow(QWidget):
                     self._switch_model(parts[1], parts[2])
             elif line.startswith("SETTINGS\t"):
                 try:
+                    if self._cfg:
+                        self._cfg.load()
                     self._apply_settings(json.loads(line.split("\t", 1)[1]))
                 except json.JSONDecodeError:
                     pass
@@ -696,6 +698,7 @@ class PetWindow(QWidget):
         if self._cfg:
             from i18n_manager import current_language
             from qfluentwidgets import isDarkTheme
+            self._cfg.load()
             self._cfg.set("language", current_language())
             self._cfg.set("character", self._current_char)
             self._cfg.set("costume", self._current_costume)

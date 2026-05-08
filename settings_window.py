@@ -525,7 +525,8 @@ class SettingsWindow(QWidget):
         self._hide_costume_preview()
         if not self._launched:
             self._on_apply()
-        self._save_llm_config()
+        else:
+            self._save_llm_config()
         self._cleanup_workers()
         super().closeEvent(event)
 
@@ -1211,9 +1212,12 @@ class SettingsWindow(QWidget):
             self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
             self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
             pov_mode = self._pov_mode.itemData(self._pov_mode.currentIndex()) or "off"
-            if pov_mode != "role":
+            if pov_mode == "role":
+                user_name = self._pov_role_character.currentText().strip()
+            else:
                 self._saved_user_name = self._user_name.text().strip()
-            self._cfg.set("user_name", getattr(self, "_saved_user_name", ""))
+                user_name = self._saved_user_name
+            self._cfg.set("user_name", user_name)
             self._cfg.set("pov_mode", pov_mode)
             self._cfg.set("pov_custom_prompt", self._pov_custom_prompt.toPlainText().strip())
             self._cfg.set("pov_role_character", self._pov_role_character.itemData(self._pov_role_character.currentIndex()) or "")

@@ -404,7 +404,15 @@ def _get_character_md_prompt(character: str) -> str:
     return _CHAR_MD_CACHE.get(character, "")
 
 
-def build_system_prompt(character: str) -> str:
+def _get_user_display_name(config_manager, pov_mode: str) -> str:
+    if pov_mode == "role":
+        role_character = config_manager.get("pov_role_character", "")
+        key_to_name = _build_key_to_name_mapping()
+        return key_to_name.get(role_character, "")
+    return config_manager.get("user_name", "").strip()
+
+
+def build_system_prompt(character: str, config_manager=None) -> str:
     base = CHARACTER_PROMPTS.get(character, CHARACTER_PROMPTS.get("anon", ""))
     if not base:
         return ""
@@ -414,6 +422,23 @@ def build_system_prompt(character: str) -> str:
     md_prompt = _get_character_md_prompt(character)
     if md_prompt:
         prompt = md_prompt + "\n\n" + prompt
+
+    if config_manager:
+        pov_mode = config_manager.get("pov_mode", "off")
+        user_name = _get_user_display_name(config_manager, pov_mode)
+        if user_name:
+            prompt += "\n\n【用户身份】\n用户是" + user_name + "。"
+        if pov_mode == "custom":
+            custom_prompt = config_manager.get("pov_custom_prompt", "").strip()
+            if custom_prompt:
+                prompt += "\n\n【用户视角设定】\n" + custom_prompt
+        elif pov_mode == "role":
+            role_character = config_manager.get("pov_role_character", "")
+            role_prompt = _get_character_md_prompt(role_character)
+            if not role_prompt:
+                role_prompt = CHARACTER_PROMPTS.get(role_character, "")
+            if role_prompt:
+                prompt += "\n\n【用户视角设定】\n用户正在扮演以下角色，请根据该角色身份与用户互动：\n" + role_prompt
 
     return prompt
 

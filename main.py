@@ -116,6 +116,7 @@ def main():
                     on_model_selected(parts[1], parts[2])
             elif line.startswith("SETTINGS\t"):
                 try:
+                    cfg.load()
                     on_settings_changed(json.loads(line.split("\t", 1)[1]))
                 except json.JSONDecodeError:
                     pass
