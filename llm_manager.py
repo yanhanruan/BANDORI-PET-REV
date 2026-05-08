@@ -367,7 +367,38 @@ def _get_character_md_prompt(character: str) -> str:
     return _CHAR_MD_CACHE.get(character, "")
 
 
-def build_system_prompt(character: str) -> str:
+def _build_pov_prompt(config_manager=None) -> str:
+    if config_manager is None:
+        return ""
+
+    mode = config_manager.get("pov_mode", "off")
+    if mode == "custom":
+        custom_prompt = config_manager.get("pov_custom_prompt", "").strip()
+        if not custom_prompt:
+            return ""
+        return (
+            "【POV 设置：用户身份】\n"
+            "用户已经为“我”提供了自定义身份设定。你必须把这段设定视为当前对话中用户的稳定身份、背景、偏好与关系视角；"
+            "不要把它改写成你的身份，也不要让角色脱离原本的人设。除非用户主动修改，否则持续按这个身份理解用户的发言。\n"
+            f"用户的“我”设定：{custom_prompt}"
+        )
+
+    if mode == "role":
+        role_character = config_manager.get("pov_role_character", "").strip()
+        if not role_character:
+            return ""
+        display_name = _build_key_to_name_mapping().get(role_character, role_character)
+        return (
+            "【POV 设置：皮上代入】\n"
+            f"用户选择代入 Bandori 角色“{display_name}”。在本次对话中，用户发来的内容应优先被理解为“{display_name}”正在与你互动。"
+            "你仍然必须保持你自己的当前角色身份与说话方式，不要扮演用户选择的角色，不要替用户行动或代写用户台词。"
+            f"可以自然参考你与“{display_name}”在作品设定中的关系、称呼、熟悉程度与情绪距离来回应。"
+        )
+
+    return ""
+
+
+def build_system_prompt(character: str, config_manager=None) -> str:
     base = CHARACTER_PROMPTS.get(character, CHARACTER_PROMPTS.get("anon", ""))
     if not base:
         return ""
@@ -377,6 +408,10 @@ def build_system_prompt(character: str) -> str:
     md_prompt = _get_character_md_prompt(character)
     if md_prompt:
         prompt = md_prompt + "\n\n" + prompt
+
+    pov_prompt = _build_pov_prompt(config_manager)
+    if pov_prompt:
+        prompt = prompt + "\n\n" + pov_prompt
 
     return prompt
 

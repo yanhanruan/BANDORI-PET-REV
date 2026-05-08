@@ -1043,7 +1043,7 @@ class ChatWindow(QWidget):
             self._conv_id = self._db.create_conversation(self._character)
         self._db.add_message(self._conv_id, "user", text)
 
-        system_prompt = build_system_prompt(self._character)
+        system_prompt = build_system_prompt(self._character, self._cfg)
         messages = [{"role": "system", "content": system_prompt}]
 
         if self._conv_id:

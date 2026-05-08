@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
     QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
     QLineEdit, QGraphicsOpacityEffect, QGraphicsColorizeEffect, QApplication,
+    QTextEdit,
 )
 
 from qfluentwidgets import (
@@ -483,10 +484,11 @@ class SettingsWindow(QWidget):
         self._nav_buttons: dict[str, NavButton] = {}
         self._current_page = "characters"
         self._vsync = vsync
+        self._saved_user_name = ""
 
         self.setWindowTitle(_tr("SettingsWindow.title"))
-        self.setMinimumSize(1050, 650)
-        self.resize(1050, 650)
+        self.setMinimumSize(1070, 650)
+        self.resize(1070, 650)
 
         self._launched = False
         self._init_ui()
@@ -617,17 +619,21 @@ class SettingsWindow(QWidget):
 
         self._char_page = self._build_char_page()
         self._costume_page = self._build_costume_page()
+        self._pov_page = self._build_pov_page()
         self._llm_page = self._build_llm_page()
         self._costume_page.hide()
         self._llm_page.hide()
+        self._pov_page.hide()
 
         self._page_stack_layout.addWidget(self._char_page)
         self._page_stack_layout.addWidget(self._costume_page)
         self._page_stack_layout.addWidget(self._llm_page)
+        self._page_stack_layout.addWidget(self._pov_page)
 
         self._pages["characters"] = self._char_page
         self._pages["costumes"] = self._costume_page
         self._pages["llm"] = self._llm_page
+        self._pages["pov"] = self._pov_page
 
         page_scroll = ScrollArea()
         page_scroll.setWidgetResizable(True)
@@ -676,6 +682,11 @@ class SettingsWindow(QWidget):
         btn_llm.nav_activated.connect(self._on_nav_selected)
         self._nav_buttons["llm"] = btn_llm
         layout.addWidget(btn_llm)
+
+        btn_pov = NavButton("pov", FluentIcon.PEOPLE, _tr("SettingsWindow.nav_pov"), sidebar)
+        btn_pov.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["pov"] = btn_pov
+        layout.addWidget(btn_pov)
 
         layout.addStretch()
 
@@ -892,44 +903,6 @@ class SettingsWindow(QWidget):
         subtitle = SubtitleLabel(_tr("SettingsWindow.llm_subtitle"), page)
         layout.addWidget(subtitle)
 
-        profile_title = SubtitleLabel(_tr("SettingsWindow.llm_profile"), page)
-        layout.addWidget(profile_title)
-
-        name_label = BodyLabel(_tr("SettingsWindow.llm_display_name"), page)
-        layout.addWidget(name_label)
-        self._user_name = QLineEdit(page)
-        self._user_name.setPlaceholderText(_tr("SettingsWindow.llm_display_name_placeholder"))
-        self._user_name.setFixedHeight(36)
-        layout.addWidget(self._user_name)
-
-        avatar_label = BodyLabel(_tr("SettingsWindow.llm_avatar_color"), page)
-        layout.addWidget(avatar_label)
-        self._avatar_colors = [
-            ("#2aabee", _tr("color.blue")),
-            ("#e91e63", _tr("color.pink")),
-            ("#9c27b0", _tr("color.purple")),
-            ("#4caf50", _tr("color.green")),
-            ("#ff9800", _tr("color.orange")),
-            ("#f44336", _tr("color.red")),
-            ("#00bcd4", _tr("color.cyan")),
-            ("#607d8b", _tr("color.grey")),
-        ]
-        colors_row = QHBoxLayout()
-        colors_row.setSpacing(6)
-        self._avatar_color_btns: list[QPushButton] = []
-        for color_hex, color_name in self._avatar_colors:
-            btn = QPushButton("", page)
-            btn.setFixedSize(28, 28)
-            btn.setCheckable(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setToolTip(color_name)
-            btn.setProperty("avatar_color", color_hex)
-            btn.clicked.connect(lambda checked, b=btn: self._on_avatar_color_clicked(b))
-            self._avatar_color_btns.append(btn)
-            colors_row.addWidget(btn)
-        colors_row.addStretch()
-        layout.addLayout(colors_row)
-
         api_url_label = BodyLabel(_tr("SettingsWindow.llm_api_url"), page)
         layout.addWidget(api_url_label)
         self._llm_api_url = QLineEdit(page)
@@ -1016,6 +989,101 @@ class SettingsWindow(QWidget):
 
         return page
 
+    def _build_pov_page(self):
+        page = self._make_theme_widget(QWidget())
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        title = TitleLabel(_tr("SettingsWindow.pov_title"), page)
+        layout.addWidget(title)
+        subtitle = SubtitleLabel(_tr("SettingsWindow.pov_subtitle"), page)
+        layout.addWidget(subtitle)
+
+        profile_title = SubtitleLabel(_tr("SettingsWindow.llm_profile"), page)
+        layout.addWidget(profile_title)
+
+        name_label = BodyLabel(_tr("SettingsWindow.llm_display_name"), page)
+        layout.addWidget(name_label)
+        self._user_name = QLineEdit(page)
+        self._user_name.setPlaceholderText(_tr("SettingsWindow.llm_display_name_placeholder"))
+        self._user_name.setFixedHeight(36)
+        layout.addWidget(self._user_name)
+
+        avatar_label = BodyLabel(_tr("SettingsWindow.llm_avatar_color"), page)
+        layout.addWidget(avatar_label)
+        self._avatar_colors = [
+            ("#2aabee", _tr("color.blue")),
+            ("#e91e63", _tr("color.pink")),
+            ("#9c27b0", _tr("color.purple")),
+            ("#4caf50", _tr("color.green")),
+            ("#ff9800", _tr("color.orange")),
+            ("#f44336", _tr("color.red")),
+            ("#00bcd4", _tr("color.cyan")),
+            ("#607d8b", _tr("color.grey")),
+        ]
+        colors_row = QHBoxLayout()
+        colors_row.setSpacing(6)
+        self._avatar_color_btns: list[QPushButton] = []
+        for color_hex, color_name in self._avatar_colors:
+            btn = QPushButton("", page)
+            btn.setFixedSize(28, 28)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(color_name)
+            btn.setProperty("avatar_color", color_hex)
+            btn.clicked.connect(lambda checked, b=btn: self._on_avatar_color_clicked(b))
+            self._avatar_color_btns.append(btn)
+            colors_row.addWidget(btn)
+        colors_row.addStretch()
+        layout.addLayout(colors_row)
+
+        mode_label = BodyLabel(_tr("SettingsWindow.pov_mode"), page)
+        layout.addWidget(mode_label)
+        self._pov_mode = ComboBox(page)
+        self._pov_mode.addItem(_tr("SettingsWindow.pov_mode_off"), userData="off")
+        self._pov_mode.addItem(_tr("SettingsWindow.pov_mode_custom"), userData="custom")
+        self._pov_mode.addItem(_tr("SettingsWindow.pov_mode_role"), userData="role")
+        self._pov_mode.setFixedHeight(36)
+        self._pov_mode.currentIndexChanged.connect(self._on_pov_mode_changed)
+        layout.addWidget(self._pov_mode)
+
+        prompt_label = BodyLabel(_tr("SettingsWindow.pov_custom_prompt"), page)
+        layout.addWidget(prompt_label)
+        self._pov_custom_prompt = QTextEdit(page)
+        self._pov_custom_prompt.setPlaceholderText(_tr("SettingsWindow.pov_custom_prompt_placeholder"))
+        self._pov_custom_prompt.setMinimumHeight(90)
+        self._pov_custom_prompt.setMaximumHeight(150)
+        layout.addWidget(self._pov_custom_prompt)
+
+        role_label = BodyLabel(_tr("SettingsWindow.pov_role_character"), page)
+        layout.addWidget(role_label)
+        self._pov_role_character = ComboBox(page)
+        self._pov_role_character.setFixedHeight(36)
+        for char_key in self._model_manager.characters:
+            self._pov_role_character.addItem(
+                self._model_manager.get_display_name(char_key),
+                userData=char_key,
+            )
+        self._pov_role_character.currentIndexChanged.connect(self._sync_role_display_name)
+        layout.addWidget(self._pov_role_character)
+
+        hint = BodyLabel(_tr("SettingsWindow.pov_hint"), page)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        save_btn = PrimaryPushButton(FluentIcon.SAVE, _tr("SettingsWindow.llm_save"), page)
+        save_btn.setFixedHeight(36)
+        save_btn.clicked.connect(self._save_llm_config)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        return page
+
     def _style_llm_inputs(self):
         dark = isDarkTheme()
         input_bg = "#282828" if dark else "#ffffff"
@@ -1033,11 +1101,23 @@ class SettingsWindow(QWidget):
             QLineEdit:focus {{
                 border-color: #60cdff;
             }}
+            QTextEdit {{
+                background: {input_bg};
+                color: {text_color};
+                border: 1px solid {input_border};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }}
+            QTextEdit:focus {{
+                border-color: #60cdff;
+            }}
         """
         self._llm_api_url.setStyleSheet(style)
         self._llm_api_key.setStyleSheet(style)
         self._llm_model_id.setStyleSheet(style)
         self._user_name.setStyleSheet(style)
+        self._pov_custom_prompt.setStyleSheet(style)
         self._style_avatar_buttons()
 
     def _style_avatar_buttons(self):
@@ -1085,7 +1165,8 @@ class SettingsWindow(QWidget):
             self._llm_api_url.setText(self._cfg.get("llm_api_url", ""))
             self._llm_api_key.setText(self._cfg.get("llm_api_key", ""))
             self._llm_model_id.setText(self._cfg.get("llm_model_id", ""))
-            self._user_name.setText(self._cfg.get("user_name", ""))
+            self._saved_user_name = self._cfg.get("user_name", "")
+            self._user_name.setText(self._saved_user_name)
             saved_color = self._cfg.get("user_avatar_color", "#2aabee")
             for btn in self._avatar_color_btns:
                 btn.setChecked(btn.property("avatar_color") == saved_color)
@@ -1096,13 +1177,46 @@ class SettingsWindow(QWidget):
                 self._llm_enable_thinking.setCurrentIndex(2)
             else:
                 self._llm_enable_thinking.setCurrentIndex(0)
+            mode = self._cfg.get("pov_mode", "off")
+            for i in range(self._pov_mode.count()):
+                if self._pov_mode.itemData(i) == mode:
+                    self._pov_mode.setCurrentIndex(i)
+                    break
+            self._pov_custom_prompt.setPlainText(self._cfg.get("pov_custom_prompt", ""))
+            saved_role = self._cfg.get("pov_role_character", "")
+            for i in range(self._pov_role_character.count()):
+                if self._pov_role_character.itemData(i) == saved_role:
+                    self._pov_role_character.setCurrentIndex(i)
+                    break
+            self._on_pov_mode_changed(self._pov_mode.currentIndex())
+
+    def _on_pov_mode_changed(self, index: int):
+        mode = self._pov_mode.itemData(index) or "off"
+        self._pov_custom_prompt.setEnabled(mode == "custom")
+        self._pov_role_character.setEnabled(mode == "role")
+        self._user_name.setEnabled(mode != "role")
+        if mode == "role":
+            self._sync_role_display_name()
+        else:
+            self._user_name.setText(getattr(self, "_saved_user_name", ""))
+
+    def _sync_role_display_name(self):
+        if self._pov_mode.itemData(self._pov_mode.currentIndex()) != "role":
+            return
+        self._user_name.setText(self._pov_role_character.currentText())
 
     def _save_llm_config(self):
         if self._cfg:
             self._cfg.set("llm_api_url", self._llm_api_url.text().strip())
             self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
             self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
-            self._cfg.set("user_name", self._user_name.text().strip())
+            pov_mode = self._pov_mode.itemData(self._pov_mode.currentIndex()) or "off"
+            if pov_mode != "role":
+                self._saved_user_name = self._user_name.text().strip()
+            self._cfg.set("user_name", getattr(self, "_saved_user_name", ""))
+            self._cfg.set("pov_mode", pov_mode)
+            self._cfg.set("pov_custom_prompt", self._pov_custom_prompt.toPlainText().strip())
+            self._cfg.set("pov_role_character", self._pov_role_character.itemData(self._pov_role_character.currentIndex()) or "")
             for btn in self._avatar_color_btns:
                 if btn.isChecked():
                     self._cfg.set("user_avatar_color", btn.property("avatar_color"))

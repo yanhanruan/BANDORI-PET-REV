@@ -22,6 +22,9 @@ DEFAULTS = {
     "llm_model_id": "",
     "user_name": "",
     "user_avatar_color": "#2aabee",
+    "pov_mode": "off",
+    "pov_custom_prompt": "",
+    "pov_role_character": "",
     "llm_enable_thinking": None,
 }
 
