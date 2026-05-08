@@ -59,11 +59,7 @@ def main():
     def init_tray():
         nonlocal tray_icon
         tray_icon = QSystemTrayIcon(app)
-        icon_path = os.path.join(
-            BASE_DIR,
-            "third_party", "PyQt-Fluent-Widgets", "qfluentwidgets",
-            "_rc", "images", "logo.png"
-        )
+        icon_path = os.path.join(BASE_DIR, "logo.ico")
         tray_icon.setIcon(QIcon(icon_path) if os.path.exists(icon_path) else QIcon())
         tray_icon.setToolTip("BandoriPet")
 

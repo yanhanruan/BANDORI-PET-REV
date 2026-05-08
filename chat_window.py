@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QRect, QRectF, QVariantAnimation, QParallelAnimationGroup
-from PySide6.QtGui import QFont, QColor, QPalette, QKeyEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QFont, QColor, QPalette, QIcon, QKeyEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextEdit, QScrollArea, QSizePolicy, QToolButton, QMenu,
@@ -12,6 +12,7 @@ from qfluentwidgets import Action, BodyLabel, StrongBodyLabel, FluentIcon, Round
 from qfluentwidgets.components.widgets.menu import TextEditMenu
 from qfluentwidgets.common.config import qconfig
 
+import os
 from datetime import datetime
 import json
 import re
@@ -619,6 +620,9 @@ class ChatWindow(QWidget):
         self._db = DatabaseManager()
         self._db.delete_empty_conversations(self._conversation_key)
 
+        icon_path = os.path.join(os.path.dirname(__file__), "logo.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.setWindowTitle(_tr("ChatWindow.title", name=self._display_name))
         self.setMinimumSize(360, 520)
         self.resize(420, 620)

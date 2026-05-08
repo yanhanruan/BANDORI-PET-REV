@@ -1,5 +1,7 @@
+import os
+
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent
-from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QCursor, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
     QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
@@ -596,6 +598,9 @@ class SettingsWindow(QWidget):
         self._vsync = vsync
         self._saved_user_name = ""
 
+        icon_path = os.path.join(os.path.dirname(__file__), "logo.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.setWindowTitle(_tr("SettingsWindow.title"))
         self.setMinimumSize(1070, 650)
         self.resize(1070, 650)

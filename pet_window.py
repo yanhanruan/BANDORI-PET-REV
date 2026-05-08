@@ -63,6 +63,9 @@ class PetWindow(QWidget):
                  character="", costume="", fps=120, opacity=1.0,
                  config_manager=None, enable_tray=True):
         super().__init__()
+        icon_path = os.path.join(os.path.dirname(__file__), "logo.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self._live2d = live2d_module
         self._model_manager = model_manager or ModelManager()
         self._current_char = character
@@ -235,11 +238,7 @@ class PetWindow(QWidget):
 
     def _init_tray(self):
         self._tray_icon = QSystemTrayIcon(self)
-        icon_path = os.path.join(
-            os.path.dirname(__file__),
-            "third_party", "PyQt-Fluent-Widgets", "qfluentwidgets",
-            "_rc", "images", "logo.png"
-        )
+        icon_path = os.path.join(os.path.dirname(__file__), "logo.ico")
         if os.path.exists(icon_path):
             self._tray_icon.setIcon(QIcon(icon_path))
         else:
