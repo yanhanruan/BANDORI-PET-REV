@@ -1,6 +1,8 @@
 {
     "costume_count": "{count} costumes",
     "character_count": "{count} characters",
+    "Common.copy": "Copy",
+    "Common.copy_all": "Copy all",
     "SettingsWindow.title": "Bandori Desktop Pet - Settings",
     "SettingsWindow.nav_title": "Navigation",
     "SettingsWindow.nav_chars": "Characters",

@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 from i18n_manager import tr as _tr
-from qfluentwidgets import BodyLabel, StrongBodyLabel, FluentIcon, isDarkTheme
+from qfluentwidgets import Action, BodyLabel, StrongBodyLabel, FluentIcon, RoundMenu, isDarkTheme
+from qfluentwidgets.components.widgets.menu import TextEditMenu
 from qfluentwidgets.common.config import qconfig
 
 from datetime import datetime
@@ -28,6 +29,33 @@ _ASSIST_BUBBLE_LIGHT = "#ffffff"
 _ASSIST_BUBBLE_DARK = "#1b1f29"
 _TEAMS_ACCENT = "#6264a7"
 _TELEGRAM_ACCENT = "#2aabee"
+
+
+class FluentContextTextEdit(QTextEdit):
+    def contextMenuEvent(self, event):
+        menu = TextEditMenu(self)
+        menu.exec(event.globalPos(), ani=True)
+
+
+class FluentContextLabel(QLabel):
+    def contextMenuEvent(self, event):
+        if not self.text():
+            return
+
+        menu = RoundMenu(parent=self)
+        selected_text = self.selectedText()
+        copy_text = selected_text or self.text()
+
+        copy_action = Action(FluentIcon.COPY, _tr("Common.copy"), self)
+        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(copy_text))
+        menu.addAction(copy_action)
+
+        copy_all_action = Action(FluentIcon.SAVE_COPY, _tr("Common.copy_all"), self)
+        copy_all_action.triggered.connect(lambda: QApplication.clipboard().setText(self.text()))
+        copy_all_action.setEnabled(copy_text != self.text())
+        menu.addAction(copy_all_action)
+
+        menu.exec(event.globalPos(), ani=True)
 
 
 def _rounded_path(rect: QRectF, radii: tuple[float, float, float, float]) -> QPainterPath:
@@ -286,7 +314,7 @@ class MessageBubble(QWidget):
         meta_font.setPointSize(8)
         self._meta.setFont(meta_font)
 
-        self._label = QLabel(self._text, self)
+        self._label = FluentContextLabel(self._text, self)
         self._label.setWordWrap(True)
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -312,7 +340,7 @@ class MessageBubble(QWidget):
         title_font.setPointSize(8)
         title_font.setBold(True)
         self._reasoning_title.setFont(title_font)
-        self._reasoning_label = QLabel(self._reasoning, self._reasoning_panel)
+        self._reasoning_label = FluentContextLabel(self._reasoning, self._reasoning_panel)
         self._reasoning_label.setWordWrap(True)
         self._reasoning_label.setTextFormat(Qt.TextFormat.PlainText)
         self._reasoning_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -700,7 +728,7 @@ class ChatWindow(QWidget):
         layout.setContentsMargins(12, 8, 8, 8)
         layout.setSpacing(8)
 
-        self._input = QTextEdit()
+        self._input = FluentContextTextEdit()
         self._input.setPlaceholderText(_tr("ChatWindow.input_placeholder"))
         self._input.setAcceptRichText(False)
         self._input.setFixedHeight(58)

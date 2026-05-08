@@ -13,6 +13,7 @@ from qfluentwidgets import (
     FluentIcon, Slider, SwitchButton, ScrollArea, ComboBox,
     setTheme, Theme, isDarkTheme, InfoBar, InfoBarPosition,
 )
+from qfluentwidgets.components.widgets.menu import LineEditMenu, TextEditMenu
 from qfluentwidgets.common.config import qconfig
 
 from i18n_manager import tr as _tr, set_language, available_languages, current_language
@@ -35,6 +36,18 @@ _ROLEPLAY_STATUS_TIPS = {
     "yellow": "部分角色支持高级角色扮演特性",
     "red": "尚未支持高级角色扮演",
 }
+
+
+class FluentContextLineEdit(QLineEdit):
+    def contextMenuEvent(self, event):
+        menu = LineEditMenu(self)
+        menu.exec(event.globalPos(), ani=True)
+
+
+class FluentContextTextEdit(QTextEdit):
+    def contextMenuEvent(self, event):
+        menu = TextEditMenu(self)
+        menu.exec(event.globalPos(), ani=True)
 
 
 class RoleplayStatusDot(QWidget):
@@ -906,14 +919,14 @@ class SettingsWindow(QWidget):
 
         api_url_label = BodyLabel(_tr("SettingsWindow.llm_api_url"), page)
         layout.addWidget(api_url_label)
-        self._llm_api_url = QLineEdit(page)
+        self._llm_api_url = FluentContextLineEdit(page)
         self._llm_api_url.setPlaceholderText(_tr("SettingsWindow.llm_api_url_placeholder"))
         self._llm_api_url.setFixedHeight(36)
         layout.addWidget(self._llm_api_url)
 
         api_key_label = BodyLabel(_tr("SettingsWindow.llm_api_key"), page)
         layout.addWidget(api_key_label)
-        self._llm_api_key = QLineEdit(page)
+        self._llm_api_key = FluentContextLineEdit(page)
         self._llm_api_key.setPlaceholderText(_tr("SettingsWindow.llm_api_key_placeholder"))
         self._llm_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._llm_api_key.setFixedHeight(36)
@@ -924,7 +937,7 @@ class SettingsWindow(QWidget):
 
         model_row = QHBoxLayout()
         model_row.setSpacing(8)
-        self._llm_model_id = QLineEdit(page)
+        self._llm_model_id = FluentContextLineEdit(page)
         self._llm_model_id.setPlaceholderText(_tr("SettingsWindow.llm_model_id_placeholder"))
         self._llm_model_id.setFixedHeight(36)
         model_row.addWidget(self._llm_model_id)
@@ -1016,7 +1029,7 @@ class SettingsWindow(QWidget):
 
         name_label = BodyLabel(_tr("SettingsWindow.llm_display_name"), page)
         layout.addWidget(name_label)
-        self._user_name = QLineEdit(page)
+        self._user_name = FluentContextLineEdit(page)
         self._user_name.setPlaceholderText(_tr("SettingsWindow.llm_display_name_placeholder"))
         self._user_name.setFixedHeight(36)
         layout.addWidget(self._user_name)
@@ -1061,7 +1074,7 @@ class SettingsWindow(QWidget):
 
         prompt_label = BodyLabel(_tr("SettingsWindow.pov_custom_prompt"), page)
         layout.addWidget(prompt_label)
-        self._pov_custom_prompt = QTextEdit(page)
+        self._pov_custom_prompt = FluentContextTextEdit(page)
         self._pov_custom_prompt.setPlaceholderText(_tr("SettingsWindow.pov_custom_prompt_placeholder"))
         self._pov_custom_prompt.setMinimumHeight(90)
         self._pov_custom_prompt.setMaximumHeight(150)
