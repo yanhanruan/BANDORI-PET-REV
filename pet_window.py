@@ -25,9 +25,13 @@ from radial_menu import RadialMenu
 
 
 WM_NCHITTEST = 0x0084
+WM_NCCALCSIZE = 0x0083
 HTTRANSPARENT = -1
+HTCLIENT = 1
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
+DWMWA_WINDOW_CORNER_PREFERENCE = 33
+DWMWCP_DONOTROUND = 1
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
@@ -39,6 +43,8 @@ if os.name == "nt":
     _get_window_long = _user32.GetWindowLongPtrW
     _set_window_long = _user32.SetWindowLongPtrW
     _set_window_pos = _user32.SetWindowPos
+    _dwmapi = ctypes.windll.dwmapi
+    _rtl_get_version = ctypes.windll.ntdll.RtlGetVersion
     _get_window_long.argtypes = [ctypes.wintypes.HWND, ctypes.c_int]
     _get_window_long.restype = ctypes.c_ssize_t
     _set_window_long.argtypes = [ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
@@ -53,10 +59,47 @@ if os.name == "nt":
         ctypes.c_uint,
     ]
     _set_window_pos.restype = ctypes.wintypes.BOOL
+
+    class _OSVERSIONINFOEXW(ctypes.Structure):
+        _fields_ = [
+            ("dwOSVersionInfoSize", ctypes.wintypes.DWORD),
+            ("dwMajorVersion", ctypes.wintypes.DWORD),
+            ("dwMinorVersion", ctypes.wintypes.DWORD),
+            ("dwBuildNumber", ctypes.wintypes.DWORD),
+            ("dwPlatformId", ctypes.wintypes.DWORD),
+            ("szCSDVersion", ctypes.wintypes.WCHAR * 128),
+            ("wServicePackMajor", ctypes.wintypes.WORD),
+            ("wServicePackMinor", ctypes.wintypes.WORD),
+            ("wSuiteMask", ctypes.wintypes.WORD),
+            ("wProductType", ctypes.wintypes.BYTE),
+            ("wReserved", ctypes.wintypes.BYTE),
+        ]
+
+    _rtl_get_version.argtypes = [ctypes.POINTER(_OSVERSIONINFOEXW)]
+    _rtl_get_version.restype = ctypes.wintypes.LONG
+    _dwm_set_window_attribute = _dwmapi.DwmSetWindowAttribute
+    _dwm_set_window_attribute.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.wintypes.DWORD,
+    ]
+    _dwm_set_window_attribute.restype = ctypes.c_long
 else:
     _get_window_long = None
     _set_window_long = None
     _set_window_pos = None
+    _dwm_set_window_attribute = None
+
+
+def _is_windows_11_or_later() -> bool:
+    if os.name != "nt":
+        return False
+    version = _OSVERSIONINFOEXW()
+    version.dwOSVersionInfoSize = ctypes.sizeof(version)
+    if _rtl_get_version(ctypes.byref(version)) != 0:
+        return False
+    return version.dwMajorVersion >= 10 and version.dwBuildNumber >= 22000
 
 
 class PetWindow(QWidget):
@@ -86,6 +129,7 @@ class PetWindow(QWidget):
         self._show_pos_set = False
         self._motion_guard_token = 0
         self._mouse_passthrough = False
+        self._use_native_hit_test_passthrough = _is_windows_11_or_later()
         self._hit_grace_ms = 250
         self._last_hit_ms = -10000
         self._hit_clock = QElapsedTimer()
@@ -106,7 +150,8 @@ class PetWindow(QWidget):
         if self._enable_tray:
             self._init_tray()
         self._load_initial_model()
-        self._passthrough_timer.start()
+        if not self._use_native_hit_test_passthrough:
+            self._passthrough_timer.start()
         self._action_bus_timer.start()
         QApplication.instance().installEventFilter(self)
 
@@ -152,7 +197,9 @@ class PetWindow(QWidget):
         if os.name == "nt":
             try:
                 msg = ctypes.wintypes.MSG.from_address(int(message))
-                if msg.message == WM_NCHITTEST:
+                if msg.message == WM_NCCALCSIZE:
+                    return True, 0
+                if msg.message == WM_NCHITTEST and self._use_native_hit_test_passthrough:
                     lparam = int(msg.lParam)
                     x = ctypes.c_short(lparam & 0xFFFF).value
                     y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
@@ -160,9 +207,37 @@ class PetWindow(QWidget):
                     hit = self._is_interaction_hit(point)
                     if not hit:
                         return True, HTTRANSPARENT
+                    return True, HTCLIENT
             except Exception:
                 pass
         return super().nativeEvent(event_type, message)
+
+    def _apply_windows_frameless_fix(self):
+        if os.name != "nt":
+            return
+        hwnd = int(self.winId())
+        if not hwnd:
+            return
+        if _is_windows_11_or_later() and _dwm_set_window_attribute is not None:
+            preference = ctypes.c_int(DWMWCP_DONOTROUND)
+            try:
+                _dwm_set_window_attribute(
+                    hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    ctypes.byref(preference),
+                    ctypes.sizeof(preference),
+                )
+            except Exception:
+                pass
+        _set_window_pos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
 
     def eventFilter(self, obj, event):
         if self._radial_menu is not None and self._radial_menu.isVisible():
@@ -174,7 +249,11 @@ class PetWindow(QWidget):
         return super().eventFilter(obj, event)
 
     def _set_mouse_passthrough(self, enabled: bool):
-        if os.name != "nt" or enabled == self._mouse_passthrough:
+        if (
+            os.name != "nt"
+            or self._use_native_hit_test_passthrough
+            or enabled == self._mouse_passthrough
+        ):
             return
         self._apply_passthrough_to_hwnd(int(self.winId()), enabled)
         self._mouse_passthrough = enabled
@@ -214,7 +293,7 @@ class PetWindow(QWidget):
         return self._hit_clock.elapsed() - self._last_hit_ms <= self._hit_grace_ms
 
     def _update_mouse_passthrough(self):
-        if os.name != "nt" or not self.isVisible():
+        if os.name != "nt" or self._use_native_hit_test_passthrough or not self.isVisible():
             return
         if self._live2d_widget._dragging or self._pixel_widget._dragging:
             return
@@ -986,6 +1065,7 @@ class PetWindow(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._apply_windows_frameless_fix()
         if self._show_pos_set:
             return
         screen = QApplication.primaryScreen()

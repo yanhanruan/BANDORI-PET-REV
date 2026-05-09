@@ -1,7 +1,7 @@
 import math
 import ctypes
 import OpenGL.GL as gl
-from PySide6.QtCore import Qt, QTimerEvent, QPoint
+from PySide6.QtCore import Qt, QTimerEvent, QPoint, QElapsedTimer
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -67,6 +67,11 @@ class Live2DWidget(QOpenGLWidget):
             (-3, 0), (3, 0), (0, -3), (0, 3),
             (-6, 0), (6, 0), (0, -6), (0, 6),
         )
+        self._hit_framebuffer_image = None
+        self._hit_framebuffer_time = -10000
+        self._hit_framebuffer_ttl_ms = 33
+        self._hit_clock = QElapsedTimer()
+        self._hit_clock.start()
 
         # 性能优化：缓存属性
         self._cache_w = 1
@@ -84,7 +89,6 @@ class Live2DWidget(QOpenGLWidget):
         # 极限优化：预分配底层 C 内存
         self._pixel_buf = (ctypes.c_ubyte * 4)()
 
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
@@ -363,10 +367,36 @@ class Live2DWidget(QOpenGLWidget):
     def _alpha_near(self, x: float, y: float) -> int:
         alpha = 0
         for dx, dy in self._hit_probe_offsets:
-            alpha = max(alpha, self._get_alpha_fast(x + dx, y + dy))
+            px = x + dx
+            py = y + dy
+            alpha = max(alpha, self._get_alpha_fast(px, py))
+            if alpha <= self._hit_alpha_threshold:
+                alpha = max(alpha, self._get_alpha_from_framebuffer(px, py))
             if alpha > self._hit_alpha_threshold:
                 break
         return alpha
+
+    def _get_alpha_from_framebuffer(self, x: float, y: float) -> int:
+        if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
+            return 0
+        try:
+            now = self._hit_clock.elapsed()
+            if (
+                self._hit_framebuffer_image is None
+                or now - self._hit_framebuffer_time > self._hit_framebuffer_ttl_ms
+            ):
+                self._hit_framebuffer_image = self.grabFramebuffer()
+                self._hit_framebuffer_time = now
+            image = self._hit_framebuffer_image
+            if image is None or image.isNull():
+                return 0
+            scale_x = image.width() / max(1, self._cache_w)
+            scale_y = image.height() / max(1, self._cache_h)
+            ix = max(0, min(image.width() - 1, int(x * scale_x)))
+            iy = max(0, min(image.height() - 1, int(y * scale_y)))
+            return image.pixelColor(ix, iy).alpha()
+        except Exception:
+            return 0
 
     def _get_alpha_fast(self, x: float, y: float) -> int:
         if not self._initialized_gl or not self._model:
@@ -377,7 +407,7 @@ class Live2DWidget(QOpenGLWidget):
         try:
             self._safe_make_current()
             sx = int(x * self._system_scale)
-            sy = int((self._cache_h - y) * self._system_scale)
+            sy = int((self._cache_h - 1 - y) * self._system_scale)
             
             gl.glReadPixels(sx, sy, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, self._pixel_buf)
             return self._pixel_buf[3]
