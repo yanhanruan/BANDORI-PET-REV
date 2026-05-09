@@ -60,6 +60,10 @@ class ModelListItem(QWidget):
         super().__init__(parent)
         self._character = character
         self._current = current
+        self._selection_anim = None
+        self._animated_bg = None
+        self.setObjectName("ModelListItem")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = QHBoxLayout(self)
@@ -82,6 +86,8 @@ class ModelListItem(QWidget):
         self._remove_btn.clicked.connect(lambda: self.remove_requested.emit(self._character))
         layout.addWidget(self._remove_btn)
         self._apply_theme()
+        if self._current:
+            QTimer.singleShot(0, self._play_selected_animation)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -90,17 +96,18 @@ class ModelListItem(QWidget):
 
     def _apply_theme(self):
         dark = isDarkTheme()
-        bg = "#263044" if self._current and dark else "#eef4ff" if self._current else "transparent"
+        selected_bg = QColor("#263044" if dark else "#eef4ff")
+        bg = self._qss_color(self._animated_bg) if self._animated_bg else self._qss_color(selected_bg) if self._current else "transparent"
         hover = "#30384a" if dark else "#f1f6ff"
         text = "#f7f7fb" if dark else "#1f2328"
         muted = "#9aa5bd" if dark else "#657089"
         danger = "#ff6b6b" if dark else "#c42b1c"
         self.setStyleSheet(f"""
-            ModelListItem {{
+            #ModelListItem {{
                 background: {bg};
                 border-radius: 8px;
             }}
-            ModelListItem:hover {{ background: {hover}; }}
+            #ModelListItem:hover {{ background: {hover}; }}
             QLabel {{ color: {muted}; font-size: 11px; }}
             BodyLabel {{ color: {text}; font-size: 13px; }}
             QToolButton {{
@@ -112,6 +119,34 @@ class ModelListItem(QWidget):
             }}
             QToolButton:hover {{ background: {'#4a2730' if dark else '#fde7e9'}; }}
         """)
+
+    @staticmethod
+    def _qss_color(color: QColor) -> str:
+        return f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alpha()})"
+
+    def _play_selected_animation(self):
+        dark = isDarkTheme()
+        start = QColor("#263044" if dark else "#eef4ff")
+        start.setAlpha(0)
+        end = QColor("#263044" if dark else "#eef4ff")
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(220)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(self._on_selected_anim_value)
+        anim.finished.connect(self._on_selected_anim_finished)
+        self._selection_anim = anim
+        anim.start()
+
+    def _on_selected_anim_value(self, value):
+        self._animated_bg = value
+        self._apply_theme()
+
+    def _on_selected_anim_finished(self):
+        self._animated_bg = None
+        self._apply_theme()
 
 
 class AddModelListItem(QPushButton):
@@ -588,7 +623,8 @@ class SettingsWindow(QWidget):
         super().__init__()
         self._model_manager = model_manager
         self._live2d = live2d_module
-        self._current_char = current_char or model_manager.characters[0]
+        characters = model_manager.characters
+        self._current_char = current_char or (characters[0] if characters else "")
         self._current_costume = current_costume
         self._fps = current_fps
         self._opacity = current_opacity

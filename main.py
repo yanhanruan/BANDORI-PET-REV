@@ -174,7 +174,14 @@ def main():
 
     def read_settings_output(process):
         data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        for line in data.splitlines():
+        buffer = settings_process_ref.get("stdout_buffer", "") + data
+        lines = buffer.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            settings_process_ref["stdout_buffer"] = lines.pop()
+        else:
+            settings_process_ref["stdout_buffer"] = ""
+        for raw_line in lines:
+            line = raw_line.rstrip("\r\n")
             if line.startswith("MODEL\t"):
                 parts = line.split("\t", 2)
                 if len(parts) == 3:
@@ -195,7 +202,23 @@ def main():
 
     def clear_settings_process(process):
         if settings_process_ref.get("process") is process:
+            buffered = settings_process_ref.get("stdout_buffer", "")
+            if buffered:
+                for line in buffered.splitlines():
+                    if line.startswith("MODEL\t"):
+                        parts = line.split("\t", 2)
+                        if len(parts) == 3:
+                            on_model_selected(parts[1], parts[2])
+                    elif line.startswith("SETTINGS\t"):
+                        try:
+                            cfg.load()
+                            on_settings_changed(json.loads(line.split("\t", 1)[1]))
+                        except json.JSONDecodeError:
+                            pass
+                    elif line == "LAUNCH":
+                        launch_pet()
             settings_process_ref.pop("process", None)
+            settings_process_ref.pop("stdout_buffer", None)
         process.deleteLater()
 
     def launch_settings_process(show_launch=True):

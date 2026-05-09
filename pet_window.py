@@ -830,7 +830,14 @@ class PetWindow(QWidget):
         import json
 
         data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        for line in data.splitlines():
+        buffer = getattr(self, "_settings_stdout_buffer", "") + data
+        lines = buffer.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            self._settings_stdout_buffer = lines.pop()
+        else:
+            self._settings_stdout_buffer = ""
+        for raw_line in lines:
+            line = raw_line.rstrip("\r\n")
             if line.startswith("MODEL\t"):
                 parts = line.split("\t", 2)
                 if len(parts) == 3:
@@ -850,7 +857,23 @@ class PetWindow(QWidget):
 
     def _on_settings_process_finished(self, process: QProcess):
         if self._settings_process is process:
+            buffered = getattr(self, "_settings_stdout_buffer", "")
+            if buffered:
+                import json
+                for line in buffered.splitlines():
+                    if line.startswith("MODEL\t"):
+                        parts = line.split("\t", 2)
+                        if len(parts) == 3:
+                            self._switch_model(parts[1], parts[2])
+                    elif line.startswith("SETTINGS\t"):
+                        try:
+                            if self._cfg:
+                                self._cfg.load()
+                            self._apply_settings(json.loads(line.split("\t", 1)[1]))
+                        except json.JSONDecodeError:
+                            pass
             self._settings_process = None
+            self._settings_stdout_buffer = ""
         process.deleteLater()
 
     def set_opacity(self, value: float):
