@@ -13,6 +13,8 @@ from qfluentwidgets.components.widgets.menu import TextEditMenu
 from qfluentwidgets.common.config import qconfig
 from process_utils import app_base_dir
 
+import ctypes
+import ctypes.wintypes
 import os
 from datetime import datetime
 import json
@@ -34,6 +36,24 @@ _ASSIST_BUBBLE_LIGHT = "#ffffff"
 _ASSIST_BUBBLE_DARK = "#1b1f29"
 _TEAMS_ACCENT = "#6264a7"
 _TELEGRAM_ACCENT = "#2aabee"
+
+DWMWA_WINDOW_CORNER_PREFERENCE = 33
+DWMWA_BORDER_COLOR = 34
+DWMWCP_DONOTROUND = 1
+DWMWA_COLOR_NONE = 0xFFFFFFFE
+
+if os.name == "nt":
+    _dwmapi = ctypes.windll.dwmapi
+    _dwm_set_window_attribute = _dwmapi.DwmSetWindowAttribute
+    _dwm_set_window_attribute.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.wintypes.DWORD,
+    ]
+    _dwm_set_window_attribute.restype = ctypes.c_long
+else:
+    _dwm_set_window_attribute = None
 
 
 class FluentContextTextEdit(QTextEdit):
@@ -644,9 +664,31 @@ class ChatWindow(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._apply_windows_11_border_fix()
         if not hasattr(self, '_entrance_done'):
             self._entrance_done = True
             QTimer.singleShot(0, self._play_entrance)
+
+    def _apply_windows_11_border_fix(self):
+        if os.name != "nt" or _dwm_set_window_attribute is None:
+            return
+        hwnd = int(self.winId())
+        if not hwnd:
+            return
+        for attr, value in (
+            (DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND),
+            (DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE),
+        ):
+            value_ref = ctypes.c_int(value)
+            try:
+                _dwm_set_window_attribute(
+                    hwnd,
+                    attr,
+                    ctypes.byref(value_ref),
+                    ctypes.sizeof(value_ref),
+                )
+            except Exception:
+                pass
 
     def _play_entrance(self):
         target = self.geometry()

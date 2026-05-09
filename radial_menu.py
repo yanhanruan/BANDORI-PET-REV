@@ -1,4 +1,6 @@
 import math
+import ctypes
+import ctypes.wintypes
 import os
 from dataclasses import dataclass
 from typing import Callable
@@ -14,6 +16,25 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QWidget, QGraphicsOpacityEffect,
 )
+
+
+DWMWA_WINDOW_CORNER_PREFERENCE = 33
+DWMWA_BORDER_COLOR = 34
+DWMWCP_DONOTROUND = 1
+DWMWA_COLOR_NONE = 0xFFFFFFFE
+
+if os.name == "nt":
+    _dwmapi = ctypes.windll.dwmapi
+    _dwm_set_window_attribute = _dwmapi.DwmSetWindowAttribute
+    _dwm_set_window_attribute.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.wintypes.DWORD,
+    ]
+    _dwm_set_window_attribute.restype = ctypes.c_long
+else:
+    _dwm_set_window_attribute = None
 
 
 class RadialMenuItem(QWidget):
@@ -133,6 +154,31 @@ class RadialMenu(QWidget):
         self._lock_anim = None
 
         self.setMouseTracking(True)
+
+    def _apply_windows_11_border_fix(self):
+        if os.name != "nt" or _dwm_set_window_attribute is None:
+            return
+        hwnd = int(self.winId())
+        if not hwnd:
+            return
+        for attr, value in (
+            (DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND),
+            (DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE),
+        ):
+            value_ref = ctypes.c_int(value)
+            try:
+                _dwm_set_window_attribute(
+                    hwnd,
+                    attr,
+                    ctypes.byref(value_ref),
+                    ctypes.sizeof(value_ref),
+                )
+            except Exception:
+                pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_windows_11_border_fix()
 
     @property
     def locked(self):
