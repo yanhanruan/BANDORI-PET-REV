@@ -176,6 +176,7 @@ class CharacterCard(CardWidget):
                  image_path: str = "", roleplay_status: str = "red", parent=None):
         super().__init__(parent)
         self._char_key = char_key
+        self._disabled_for_existing = False
         self.setFixedSize(220, 360)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -212,6 +213,8 @@ class CharacterCard(CardWidget):
         qconfig.themeChanged.connect(self._update_count_label_style)
 
     def animate_in(self, delay_ms: int = 0):
+        if self._disabled_for_existing:
+            return
         effect = QGraphicsOpacityEffect(self)
         effect.setOpacity(0.0)
         self.setGraphicsEffect(effect)
@@ -234,7 +237,19 @@ class CharacterCard(CardWidget):
         self._count_label.setStyleSheet(self._count_label_style())
 
     def _on_card_clicked(self):
+        if self._disabled_for_existing:
+            return
         self.char_selected.emit(self._char_key)
+
+    def set_disabled_for_existing(self, disabled: bool):
+        self._disabled_for_existing = disabled
+        self.setEnabled(not disabled)
+        self.setCursor(Qt.CursorShape.ForbiddenCursor if disabled else Qt.CursorShape.PointingHandCursor)
+        self.setGraphicsEffect(None)
+        if disabled:
+            effect = QGraphicsOpacityEffect(self)
+            effect.setOpacity(0.38)
+            self.setGraphicsEffect(effect)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -653,7 +668,9 @@ class SettingsWindow(QWidget):
                 path = self._model_manager.get_model_json_path(character, costume)
                 if not path:
                     continue
-                result.append({"character": character, "costume": costume, "path": path})
+                entry = dict(item)
+                entry.update({"character": character, "costume": costume, "path": path})
+                result.append(entry)
                 seen.add(character)
         if self._current_char and self._current_char not in seen:
             costume = self._current_costume or self._model_manager.get_default_costume(self._current_char)
@@ -1139,6 +1156,10 @@ class SettingsWindow(QWidget):
         band_display = self._model_manager.get_band_display_name(band_id)
         self._selection_title.setText(_tr("SettingsWindow.char_title"))
         self._selection_subtitle.setText(_tr("SettingsWindow.char_subtitle_with_band", band=band_display))
+        configured_characters = {
+            item["character"] for item in self._configured_models
+            if item.get("character") != self._selected_list_character
+        }
 
         col = 0
         row = 0
@@ -1154,6 +1175,7 @@ class SettingsWindow(QWidget):
                 "green" if self._model_manager.has_advanced_roleplay(char_key) else "red",
                 self._selection_grid_widget
             )
+            card.set_disabled_for_existing(char_key in configured_characters)
             card.char_selected.connect(self._on_char_selected)
             card.animate_in(delay_ms=card_idx * 80)
             self._char_grid.addWidget(card, row, col)
@@ -1850,6 +1872,9 @@ class SettingsWindow(QWidget):
         entry = {"character": character, "costume": costume, "path": path}
         for idx, item in enumerate(self._configured_models):
             if item["character"] == character:
+                preserved = dict(item)
+                preserved.update(entry)
+                entry = preserved
                 self._configured_models[idx] = entry
                 break
         else:

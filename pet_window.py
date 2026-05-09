@@ -80,7 +80,7 @@ class PetWindow(QWidget):
         self._chat_process = None
         self._settings_process = None
         self._pixel_frames = load_pixel_frames()
-        self._pixel_mode = bool(self._cfg.get("pet_mode", "live2d") == "pixel") if self._cfg else False
+        self._pixel_mode = self._configured_pet_mode() == "pixel"
         self._pixel_ready = False
         self._show_pos_set = False
         self._motion_guard_token = 0
@@ -289,6 +289,29 @@ class PetWindow(QWidget):
             if self._pixel_mode and not self._enable_pixel_mode(save=False):
                 self._enable_live2d_mode(save=False)
             self._update_tooltip()
+
+    def _current_model_entry(self) -> dict:
+        if not self._cfg:
+            return {}
+        models = self._cfg.get("models", [])
+        if isinstance(models, list):
+            for item in models:
+                if isinstance(item, dict) and item.get("character") == self._current_char:
+                    return item
+        return {}
+
+    def _configured_pet_mode(self) -> str:
+        if not self._cfg:
+            return "live2d"
+        entry = self._current_model_entry()
+        mode = entry.get("pet_mode") if entry else None
+        if mode in {"live2d", "pixel"}:
+            return mode
+        models = self._cfg.get("models", [])
+        if isinstance(models, list) and len(models) > 1:
+            return "live2d"
+        mode = self._cfg.get("pet_mode", "live2d")
+        return mode if mode in {"live2d", "pixel"} else "live2d"
 
     def _switch_model(self, character: str, costume: str):
         path = self._model_manager.get_model_json_path(character, costume)
@@ -716,6 +739,7 @@ class PetWindow(QWidget):
     def _remember_current_position(self):
         if not self._cfg:
             return
+        path = self._model_manager.get_model_json_path(self._current_char, self._current_costume)
         if self._pixel_mode:
             self._cfg.set("pixel_window_x", self.x())
             self._cfg.set("pixel_window_y", self.y())
@@ -724,15 +748,17 @@ class PetWindow(QWidget):
             self._cfg.set("window_y", self.y())
             self._cfg.set("window_width", self.width())
             self._cfg.set("window_height", self.height())
+        self._sync_current_model_entry(path, save=False)
 
     def _restore_live2d_position(self):
         if not self._cfg:
             self.resize(400, 500)
             return
-        w = self._cfg.get("window_width", 400)
-        h = self._cfg.get("window_height", 500)
-        x = self._cfg.get("window_x", -1)
-        y = self._cfg.get("window_y", -1)
+        entry = self._current_model_entry()
+        w = entry.get("window_width", self._cfg.get("window_width", 400))
+        h = entry.get("window_height", self._cfg.get("window_height", 500))
+        x = entry.get("window_x", self._cfg.get("window_x", -1))
+        y = entry.get("window_y", self._cfg.get("window_y", -1))
         self.resize(w, h)
         if x >= 0 and y >= 0:
             self.move(x, y)
@@ -740,8 +766,9 @@ class PetWindow(QWidget):
     def _restore_pixel_position(self):
         if not self._cfg:
             return
-        x = self._cfg.get("pixel_window_x", -1)
-        y = self._cfg.get("pixel_window_y", -1)
+        entry = self._current_model_entry()
+        x = entry.get("pixel_window_x", self._cfg.get("pixel_window_x", -1))
+        y = entry.get("pixel_window_y", self._cfg.get("pixel_window_y", -1))
         if x >= 0 and y >= 0:
             self.move(x, y)
 
@@ -865,6 +892,7 @@ class PetWindow(QWidget):
         if not isinstance(models, list):
             models = []
         entry = {"character": self._current_char, "costume": self._current_costume, "path": path}
+        entry["pet_mode"] = "pixel" if self._pixel_mode else "live2d"
         if self._pixel_mode:
             entry.update({
                 "pixel_window_x": self.x(),
