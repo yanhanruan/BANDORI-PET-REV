@@ -582,8 +582,11 @@ class SettingsWindow(QWidget):
         self._selection_cards: list[CardWidget] = []
         self._selected_costume = ""
         self._configured_models = self._load_configured_models()
-        self._selected_list_character = self._configured_models[0]["character"] if self._configured_models else ""
-        if self._selected_list_character:
+        self._selected_list_character = ""
+        if self._current_char:
+            self._selected_list_character = self._current_char
+        elif self._configured_models:
+            self._selected_list_character = self._configured_models[0]["character"]
             self._current_char = self._selected_list_character
             self._current_costume = self._configured_models[0]["costume"]
         self._selected_band = model_manager.get_character_band(self._current_char)
