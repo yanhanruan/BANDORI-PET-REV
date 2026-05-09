@@ -4,7 +4,7 @@ import os
 import random
 import re
 
-from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent
+from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent, QElapsedTimer
 from PySide6.QtGui import QColor, QIcon, QCursor, QMoveEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu, QStackedLayout,
@@ -86,6 +86,10 @@ class PetWindow(QWidget):
         self._show_pos_set = False
         self._motion_guard_token = 0
         self._mouse_passthrough = False
+        self._hit_grace_ms = 250
+        self._last_hit_ms = -10000
+        self._hit_clock = QElapsedTimer()
+        self._hit_clock.start()
         self._passthrough_timer = QTimer(self)
         self._passthrough_timer.setInterval(50)
         self._passthrough_timer.timeout.connect(self._update_mouse_passthrough)
@@ -153,10 +157,7 @@ class PetWindow(QWidget):
                     x = ctypes.c_short(lparam & 0xFFFF).value
                     y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
                     point = QPoint(x, y)
-                    if self._pixel_mode:
-                        hit = self._pixel_widget.is_sprite_hit_at_global(point)
-                    else:
-                        hit = self._live2d_widget.is_model_hit_at_global(point)
+                    hit = self._is_interaction_hit(point)
                     if not hit:
                         return True, HTTRANSPARENT
             except Exception:
@@ -197,6 +198,21 @@ class PetWindow(QWidget):
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         )
 
+    def _is_interaction_hit(self, global_pos: QPoint) -> bool:
+        if self._pixel_mode:
+            hit = self._pixel_widget.is_sprite_hit_at_global(global_pos)
+        else:
+            hit = self._live2d_widget.is_model_hit_at_global(global_pos)
+        if hit:
+            self._last_hit_ms = self._hit_clock.elapsed()
+            return True
+        return self._is_recent_interaction_hit(global_pos)
+
+    def _is_recent_interaction_hit(self, global_pos: QPoint) -> bool:
+        if not self.geometry().contains(global_pos):
+            return False
+        return self._hit_clock.elapsed() - self._last_hit_ms <= self._hit_grace_ms
+
     def _update_mouse_passthrough(self):
         if os.name != "nt" or not self.isVisible():
             return
@@ -206,10 +222,7 @@ class PetWindow(QWidget):
         if not self.geometry().contains(global_pos):
             self._set_mouse_passthrough(False)
             return
-        if self._pixel_mode:
-            hit = self._pixel_widget.is_sprite_hit_at_global(global_pos)
-        else:
-            hit = self._live2d_widget.is_model_hit_at_global(global_pos)
+        hit = self._is_interaction_hit(global_pos)
         self._set_mouse_passthrough(not hit)
 
     def set_fps(self, fps: int):
@@ -366,6 +379,7 @@ class PetWindow(QWidget):
             self._radial_menu.dismiss()
 
     def _on_right_click(self, gx: int, gy: int):
+        self._set_mouse_passthrough(False)
         if self._radial_menu is not None and self._radial_menu.isVisible():
             self._radial_menu.dismiss()
             return

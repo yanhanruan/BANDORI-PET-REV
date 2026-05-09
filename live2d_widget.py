@@ -59,6 +59,12 @@ class Live2DWidget(QOpenGLWidget):
         self._static_render = False
         self._static_render_done = False
         self._clear_color = (0.0, 0.0, 0.0, 0.0)
+        self._hit_alpha_threshold = 8
+        self._hit_probe_offsets = (
+            (0, 0),
+            (-3, 0), (3, 0), (0, -3), (0, 3),
+            (-6, 0), (6, 0), (0, -6), (0, 6),
+        )
 
         # 性能优化：缓存属性
         self._cache_w = 1
@@ -346,10 +352,19 @@ class Live2DWidget(QOpenGLWidget):
             return False
         try:
             if hasattr(model, "HitPart"):
-                return bool(model.HitPart(x, y, topOnly=True))
+                if model.HitPart(x, y, topOnly=True):
+                    return True
         except Exception:
             pass
-        return self._get_alpha_fast(x, y) > 8
+        return self._alpha_near(x, y) > self._hit_alpha_threshold
+
+    def _alpha_near(self, x: float, y: float) -> int:
+        alpha = 0
+        for dx, dy in self._hit_probe_offsets:
+            alpha = max(alpha, self._get_alpha_fast(x + dx, y + dy))
+            if alpha > self._hit_alpha_threshold:
+                break
+        return alpha
 
     def _get_alpha_fast(self, x: float, y: float) -> int:
         if not self._initialized_gl or not self._model:
