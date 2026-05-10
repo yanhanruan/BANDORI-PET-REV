@@ -15,7 +15,13 @@ from shiboken6 import isValid
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from qfluentwidgets import setTheme, Theme
+from fluent_silencer import import_qfluentwidgets
+
+_qfluentwidgets = import_qfluentwidgets(lambda: __import__(
+    "qfluentwidgets", fromlist=["setTheme", "Theme"]
+))
+setTheme = _qfluentwidgets.setTheme
+Theme = _qfluentwidgets.Theme
 
 import live2d.v2 as live2d
 from platform_patch import PatchedPlatformManager

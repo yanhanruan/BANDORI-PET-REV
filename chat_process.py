@@ -7,7 +7,13 @@ from process_utils import app_base_dir
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtWidgets import QApplication
 
-from qfluentwidgets import Theme, setTheme
+from fluent_silencer import import_qfluentwidgets
+
+_qfluentwidgets = import_qfluentwidgets(lambda: __import__(
+    "qfluentwidgets", fromlist=["Theme", "setTheme"]
+))
+Theme = _qfluentwidgets.Theme
+setTheme = _qfluentwidgets.setTheme
 
 from chat_window import ChatWindow
 from config_manager import ConfigManager
