@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent
 from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush
@@ -6,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
     QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
     QLineEdit, QGraphicsOpacityEffect, QGraphicsColorizeEffect, QApplication,
-    QTextEdit, QToolButton,
+    QTextEdit, QToolButton, QFileDialog, QMessageBox,
 )
 
 from qfluentwidgets import (
@@ -1383,6 +1384,29 @@ class SettingsWindow(QWidget):
         self._llm_model_scroll.setWidget(self._llm_model_list)
         layout.addWidget(self._llm_model_scroll)
 
+        data_title = SubtitleLabel(_tr("SettingsWindow.chat_data_title"), page)
+        layout.addWidget(data_title)
+
+        data_hint = BodyLabel(_tr("SettingsWindow.chat_data_hint"), page)
+        data_hint.setWordWrap(True)
+        layout.addWidget(data_hint)
+
+        data_btn_row = QHBoxLayout()
+        data_btn_row.setSpacing(8)
+
+        export_btn = PushButton(FluentIcon.SAVE, _tr("SettingsWindow.chat_data_export"), page)
+        export_btn.setFixedHeight(36)
+        export_btn.clicked.connect(self._export_chat_database)
+        data_btn_row.addWidget(export_btn)
+
+        import_btn = PushButton(FluentIcon.SYNC, _tr("SettingsWindow.chat_data_import"), page)
+        import_btn.setFixedHeight(36)
+        import_btn.clicked.connect(self._import_chat_database)
+        data_btn_row.addWidget(import_btn)
+
+        data_btn_row.addStretch()
+        layout.addLayout(data_btn_row)
+
         layout.addStretch()
 
         btn_row = QHBoxLayout()
@@ -1713,6 +1737,87 @@ class SettingsWindow(QWidget):
                 )
             except Exception:
                 pass
+
+    def _default_chat_backup_path(self) -> str:
+        name = "bandori-chat-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".db"
+        return str(app_base_dir() / name)
+
+    def _export_chat_database(self):
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            _tr("SettingsWindow.chat_data_export_dialog"),
+            self._default_chat_backup_path(),
+            _tr("SettingsWindow.chat_data_filter"),
+        )
+        if not path:
+            return
+        if not os.path.splitext(path)[1]:
+            path += ".db"
+
+        try:
+            from database_manager import export_chat_database
+
+            summary = export_chat_database(path)
+            InfoBar.success(
+                _tr("SettingsWindow.chat_data_export_title"),
+                _tr(
+                    "SettingsWindow.chat_data_export_content",
+                    conversations=summary["conversations"],
+                    messages=summary["messages"],
+                ),
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        except Exception as exc:
+            self._show_chat_data_error(exc)
+
+    def _import_chat_database(self):
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            _tr("SettingsWindow.chat_data_import_dialog"),
+            str(app_base_dir()),
+            _tr("SettingsWindow.chat_data_filter"),
+        )
+        if not path:
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            _tr("SettingsWindow.chat_data_import_confirm_title"),
+            _tr("SettingsWindow.chat_data_import_confirm_content"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            from database_manager import import_chat_database
+
+            summary = import_chat_database(path)
+            InfoBar.success(
+                _tr("SettingsWindow.chat_data_import_title"),
+                _tr(
+                    "SettingsWindow.chat_data_import_content",
+                    conversations=summary["conversations"],
+                    messages=summary["messages"],
+                ),
+                duration=4000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        except Exception as exc:
+            self._show_chat_data_error(exc)
+
+    def _show_chat_data_error(self, exc: Exception):
+        InfoBar.error(
+            _tr("SettingsWindow.chat_data_failed_title"),
+            str(exc),
+            duration=4000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
 
     def _test_connection(self):
         api_url = self._llm_api_url.text().strip()
