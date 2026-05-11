@@ -1,7 +1,6 @@
-import math
 import ctypes
 import OpenGL.GL as gl
-from PySide6.QtCore import Qt, QPoint, QElapsedTimer, Signal
+from PySide6.QtCore import Qt, QPoint, QElapsedTimer, QTimer, Signal
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from live2d_quality import LIVE2D_QUALITY_PROFILES, normalize_live2d_quality
@@ -61,6 +60,9 @@ class Live2DWidget(QOpenGLWidget):
         )
         self._hit_alpha_cache = {}
         self._hit_alpha_cache_ttl_ms = 100
+        self._hit_test_interval_ms = round(1000 / 30)
+        self._last_hit_test_ms = -1000
+        self._last_hit_state = False
         self._hit_pbo_ids = []
         self._hit_pbo_next = 0
         self._hit_pbo_pending = []
@@ -68,6 +70,15 @@ class Live2DWidget(QOpenGLWidget):
         self._hit_pbo_size = 4
         self._hit_clock = QElapsedTimer()
         self._hit_clock.start()
+        self._custom_hit_areas_scene = ()
+        self._custom_hit_areas = ()
+        self._render_timer = QTimer(self)
+        self._render_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._render_timer.timeout.connect(self.update)
+        self._head_track_timer = QTimer(self)
+        self._head_track_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._head_track_timer.setInterval(round(1000 / 30))
+        self._head_track_timer.timeout.connect(self._poll_head_tracking)
 
         # 性能优化：缓存属性
         self._cache_w = 1
@@ -80,7 +91,7 @@ class Live2DWidget(QOpenGLWidget):
         # 性能优化：鼠标脏标记
         self._last_cursor_x = -1
         self._last_cursor_y = -1
-        self._head_track_counter = 0
+        self._head_track_min_delta_sq = 16
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
@@ -94,6 +105,7 @@ class Live2DWidget(QOpenGLWidget):
 
     def set_fps(self, fps: int):
         self._fps = max(10, min(fps, 240))
+        self._update_render_timer()
 
     def set_vsync(self, enabled: bool):
         self._vsync = enabled
@@ -120,6 +132,7 @@ class Live2DWidget(QOpenGLWidget):
     def set_static_render(self, enabled: bool):
         self._static_render = enabled
         self._static_render_done = False
+        self._update_render_timer()
         self.update()
 
     def set_clear_color(self, r: float, g: float, b: float, a: float):
@@ -162,13 +175,95 @@ class Live2DWidget(QOpenGLWidget):
             disable_precision = LIVE2D_QUALITY_PROFILES[self._quality_profile]["disable_precision"]
             self._model = self._live2d.LAppModel()
             self._model.LoadModelJson(model_json_path, disable_precision=disable_precision)
+            self._custom_hit_areas_scene = self._prepare_custom_hit_areas(self._model)
             self._model.Resize(self._cache_w, self._cache_h)
+            self._update_custom_hit_area_projection()
             self._model_path = model_json_path
+            self._update_render_timer()
             self.model_loaded.emit()
         except Exception as e:
             print(f"Failed to load model: {e}")
             self._model = None
             self._model_path = ""
+            self._custom_hit_areas_scene = ()
+            self._custom_hit_areas = ()
+            self._update_render_timer()
+
+    def _frame_interval_ms(self) -> int:
+        return max(1, round(1000 / self._fps))
+
+    def _update_render_timer(self):
+        if not self._initialized_gl or self._static_render or not self._model or not self.isVisible():
+            self._render_timer.stop()
+            self._head_track_timer.stop()
+            return
+        self._render_timer.start(self._frame_interval_ms())
+        self._head_track_timer.start()
+
+    def _prepare_custom_hit_areas(self, model):
+        try:
+            setting = getattr(model, "modelSetting", None)
+            config = getattr(setting, "json", {}) if setting is not None else {}
+            areas = config.get("hit_areas_custom") or {}
+            if not isinstance(areas, dict):
+                return ()
+
+            prepared = []
+            for name, x_range in areas.items():
+                if not name.endswith("_x") or not isinstance(x_range, list) or len(x_range) != 2:
+                    continue
+                y_range = areas.get(f"{name[:-2]}_y")
+                if not isinstance(y_range, list) or len(y_range) != 2:
+                    continue
+                x0, x1 = float(x_range[0]), float(x_range[1])
+                y0, y1 = float(y_range[0]), float(y_range[1])
+                prepared.append((min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)))
+            return tuple(prepared)
+        except Exception:
+            return ()
+
+    def _update_custom_hit_area_projection(self):
+        model = self._model
+        scene_areas = self._custom_hit_areas_scene
+        if not model or not scene_areas:
+            self._custom_hit_areas = ()
+            return
+        try:
+            matrix = model.matrixManager
+            c0x, c0y = matrix.screenToScene(0.0, 0.0)
+            c1x, c1y = matrix.screenToScene(1.0, 0.0)
+            c2x, c2y = matrix.screenToScene(0.0, 1.0)
+            ax = c1x - c0x
+            ay = c1y - c0y
+            bx = c2x - c0x
+            by = c2y - c0y
+            det = ax * by - bx * ay
+            if det == 0:
+                self._custom_hit_areas = ()
+                return
+
+            inv_det = 1.0 / det
+
+            def scene_to_screen(sx: float, sy: float):
+                dx = sx - c0x
+                dy = sy - c0y
+                return ((by * dx - bx * dy) * inv_det, (-ay * dx + ax * dy) * inv_det)
+
+            projected = []
+            for min_x, max_x, min_y, max_y in scene_areas:
+                p0x, p0y = scene_to_screen(min_x, min_y)
+                p1x, p1y = scene_to_screen(min_x, max_y)
+                p2x, p2y = scene_to_screen(max_x, min_y)
+                p3x, p3y = scene_to_screen(max_x, max_y)
+                projected.append((
+                    min(p0x, p1x, p2x, p3x),
+                    max(p0x, p1x, p2x, p3x),
+                    min(p0y, p1y, p2y, p3y),
+                    max(p0y, p1y, p2y, p3y),
+                ))
+            self._custom_hit_areas = tuple(projected)
+        except Exception:
+            self._custom_hit_areas = ()
 
     @property
     def model(self):
@@ -192,9 +287,24 @@ class Live2DWidget(QOpenGLWidget):
         self._cache_h_half = self._cache_h * 0.5
         super().resizeEvent(event)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_render_timer()
+
+    def hideEvent(self, event):
+        self._render_timer.stop()
+        self._head_track_timer.stop()
+        super().hideEvent(event)
+
     def initializeGL(self):
         if self._live2d:
             self._live2d.glInit()
+        try:
+            gl.glEnable(gl.GL_MULTISAMPLE)
+        except Exception:
+            pass
+        gl.glDisable(gl.GL_DEPTH_TEST)
+        gl.glDisable(gl.GL_DITHER)
         self._system_scale = QGuiApplication.primaryScreen().devicePixelRatio()
         self._initialized_gl = True
         
@@ -209,6 +319,7 @@ class Live2DWidget(QOpenGLWidget):
         if self._pending_model:
             self._load_model_internal(self._pending_model)
         self._init_hit_pbos()
+        self._update_render_timer()
         self.update()
 
     def resizeGL(self, w: int, h: int):
@@ -216,6 +327,7 @@ class Live2DWidget(QOpenGLWidget):
         gl.glViewport(0, 0, int(w * self._system_scale), int(h * self._system_scale))
         if self._model:
             self._model.Resize(w, h)
+            self._update_custom_hit_area_projection()
 
     def paintGL(self):
         if self._static_render and self._static_render_done:
@@ -224,14 +336,6 @@ class Live2DWidget(QOpenGLWidget):
         model = self._model
         if not self._live2d or not model:
             return
-
-        try:
-            gl.glEnable(gl.GL_MULTISAMPLE)
-        except Exception:
-            pass
-        
-        gl.glDisable(gl.GL_DEPTH_TEST)
-        gl.glDisable(gl.GL_DITHER)
 
         gl.glClearColor(*self._clear_color)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_STENCIL_BUFFER_BIT)
@@ -242,46 +346,44 @@ class Live2DWidget(QOpenGLWidget):
         self._live2d.clearBuffer()
         gl.glClearColor(*self._clear_color)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_STENCIL_BUFFER_BIT)
-        self._update_head_tracking(model)
         model.Update()
         model.Draw()
         if self._static_render:
             self._static_render_done = True
-        elif self.isVisible():
-            self.update()
 
-    def _update_head_tracking(self, model):
-        if not self._dragging and model is not None:
-            self._head_track_counter += 1
-            if self._head_track_counter >= 3:
-                self._head_track_counter = 0
-                
-                g_pos = QCursor.pos()
-                gx, gy = g_pos.x(), g_pos.y()
-                widget_pos = self.mapToGlobal(QPoint(0, 0))
-                self._cache_global_x = widget_pos.x()
-                self._cache_global_y = widget_pos.y()
+    def _track_head_at_global(self, gx: float, gy: float):
+        model = self._model
+        if self._dragging or model is None:
+            return
+        cursor_dx = gx - self._last_cursor_x
+        cursor_dy = gy - self._last_cursor_y
+        if cursor_dx * cursor_dx + cursor_dy * cursor_dy < self._head_track_min_delta_sq:
+            return
+        self._last_cursor_x = gx
+        self._last_cursor_y = gy
 
-                if gx != self._last_cursor_x or gy != self._last_cursor_y:
-                    self._last_cursor_x = gx
-                    self._last_cursor_y = gy
-                    
-                    cx = self._cache_global_x + self._cache_w_half
-                    cy = self._cache_global_y + self._cache_h_half
-                    dx = gx - cx
-                    dy = gy - cy
-                    
-                    dist = math.hypot(dx, dy)
-                    if dist > 0:
-                        max_dist = 600.0
-                        norm = 1.0 if dist > max_dist else dist / max_dist
-                        factor = norm / dist
-                        ux = dx * factor
-                        uy = dy * factor
-                        
-                        local_x = cx + ux * max_dist - self._cache_global_x
-                        local_y = cy + uy * max_dist - self._cache_global_y
-                        model.Drag(local_x, local_y)
+        cx = self._cache_global_x + self._cache_w_half
+        cy = self._cache_global_y + self._cache_h_half
+        dx = gx - cx
+        dy = gy - cy
+        dist_sq = dx * dx + dy * dy
+        if dist_sq <= 0:
+            return
+
+        max_dist = 600.0
+        max_dist_sq = max_dist * max_dist
+        if dist_sq <= max_dist_sq:
+            local_x = gx - self._cache_global_x
+            local_y = gy - self._cache_global_y
+        else:
+            factor = max_dist / (dist_sq ** 0.5)
+            local_x = self._cache_w_half + dx * factor
+            local_y = self._cache_h_half + dy * factor
+        model.Drag(local_x, local_y)
+
+    def _poll_head_tracking(self):
+        pos = QCursor.pos()
+        self._track_head_at_global(pos.x(), pos.y())
 
     def mousePressEvent(self, event: QMouseEvent):
         if self._drag_locked:
@@ -352,11 +454,18 @@ class Live2DWidget(QOpenGLWidget):
 
     def _hit_state_at(self, x: float, y: float):
         if not self._model or not self._is_in_model_hit_area(x, y):
+            self._last_hit_state = False
             return False
+        now = self._hit_clock.elapsed()
+        if now - self._last_hit_test_ms < self._hit_test_interval_ms:
+            return self._last_hit_state
+        self._last_hit_test_ms = now
         alpha = self._alpha_near(x, y)
         if alpha is None:
+            self._last_hit_state = None
             return None
-        return alpha > self._hit_alpha_threshold
+        self._last_hit_state = alpha > self._hit_alpha_threshold
+        return self._last_hit_state
 
     def _is_in_model_hit_area(self, x: float, y: float) -> bool:
         return self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)
@@ -372,30 +481,18 @@ class Live2DWidget(QOpenGLWidget):
             return False
 
     def _is_in_custom_hit_area(self, x: float, y: float) -> bool:
-        model = self._model
-        try:
-            setting = getattr(model, "modelSetting", None)
-            config = getattr(setting, "json", {}) if setting is not None else {}
-            areas = config.get("hit_areas_custom") or {}
-            if not areas:
-                return False
-            sx, sy = model.matrixManager.screenToScene(x, y)
-            for name, x_range in areas.items():
-                if not name.endswith("_x") or not isinstance(x_range, list) or len(x_range) != 2:
-                    continue
-                y_range = areas.get(f"{name[:-2]}_y")
-                if not isinstance(y_range, list) or len(y_range) != 2:
-                    continue
-                min_x, max_x = sorted((float(x_range[0]), float(x_range[1])))
-                min_y, max_y = sorted((float(y_range[0]), float(y_range[1])))
-                if min_x <= sx <= max_x and min_y <= sy <= max_y:
-                    return True
-        except Exception:
+        areas = self._custom_hit_areas
+        if not areas:
             return False
+        for min_x, max_x, min_y, max_y in areas:
+            if min_x <= x <= max_x and min_y <= y <= max_y:
+                return True
         return False
 
     def _clear_hit_framebuffer_cache(self):
         self._hit_alpha_cache.clear()
+        self._last_hit_test_ms = -1000
+        self._last_hit_state = False
         self._clear_pending_hit_pbos()
 
     def _init_hit_pbos(self):
@@ -544,6 +641,8 @@ class Live2DWidget(QOpenGLWidget):
         if not self._initialized_gl or not self._model:
             return 0
         if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
+            return 0
+        if not (self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)):
             return 0
 
         try:
