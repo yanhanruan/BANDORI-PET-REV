@@ -1,22 +1,11 @@
 import math
 import ctypes
 import OpenGL.GL as gl
-from PySide6.QtCore import Qt, QTimerEvent, QPoint, QElapsedTimer
+from PySide6.QtCore import Qt, QTimerEvent, QPoint, QElapsedTimer, Signal
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from live2d_quality import LIVE2D_QUALITY_PROFILES, normalize_live2d_quality
 from platform_patch import set_live2d_texture_quality
-
-
-LIVE2D_QUALITY_PROFILES = {
-    "performance": {"disable_precision": True},
-    "balanced": {"disable_precision": True},
-    "quality": {"disable_precision": True},
-    "ultra": {"disable_precision": True},
-}
-
-
-def normalize_live2d_quality(profile: str) -> str:
-    return profile if profile in LIVE2D_QUALITY_PROFILES else "balanced"
 
 
 def _get_display_refresh():
@@ -32,6 +21,8 @@ def _get_display_refresh():
 
 
 class Live2DWidget(QOpenGLWidget):
+    model_loaded = Signal()
+
     @staticmethod
     def configure_default_surface_format():
         """Apply the OpenGL surface format Live2D requires.
@@ -202,6 +193,7 @@ class Live2DWidget(QOpenGLWidget):
             self._model.LoadModelJson(model_json_path, disable_precision=disable_precision)
             self._model.Resize(self._cache_w, self._cache_h)
             self._model_path = model_json_path
+            self.model_loaded.emit()
         except Exception as e:
             print(f"Failed to load model: {e}")
             self._model = None

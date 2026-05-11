@@ -207,6 +207,7 @@ class PetWindow(QWidget):
         self._live2d_widget.set_right_click_callback(self._on_right_click)
         self._live2d_widget.set_fps(self._fps)
         self._live2d_widget.set_render_quality(self._live2d_quality)
+        self._live2d_widget.model_loaded.connect(self._on_live2d_model_loaded)
         self._stack.addWidget(self._live2d_widget)
 
         self._pixel_widget = PixelPetWidget(self)
@@ -434,6 +435,10 @@ class PetWindow(QWidget):
             self._enable_live2d_mode(save=False)
         self._update_tooltip()
         self._save_config()
+
+    def _on_live2d_model_loaded(self):
+        self._motion_guard_token += 1
+        QTimer.singleShot(0, lambda t=self._motion_guard_token: self._restore_default_motion(t, force_clear=False))
 
     def _apply_settings(self, data: dict):
         if "fps" in data:
@@ -801,6 +806,18 @@ class PetWindow(QWidget):
             motion_names = list(model.modelSetting.getMotionNames())
         except Exception:
             motion_names = []
+        configured_motion = str(self._current_model_entry().get("default_motion", ""))
+        if configured_motion in motion_names:
+            try:
+                priority = self._live2d.MotionPriority.NORMAL if smooth else self._live2d.MotionPriority.FORCE
+                model.StartRandomMotion(configured_motion, priority=priority)
+                return
+            except Exception:
+                try:
+                    model.StartMotion(configured_motion, 0, self._live2d.MotionPriority.FORCE)
+                    return
+                except Exception:
+                    pass
         idle_names = [name for name in motion_names if str(name).lower().startswith("idle")]
         if idle_names:
             idle_name = random.choice(idle_names)
@@ -1051,6 +1068,9 @@ class PetWindow(QWidget):
         if not isinstance(models, list):
             models = []
         entry = {"character": self._current_char, "costume": self._current_costume, "path": path}
+        default_motion = self._current_model_entry().get("default_motion", "")
+        if default_motion:
+            entry["default_motion"] = default_motion
         entry["pet_mode"] = "pixel" if self._pixel_mode else "live2d"
         if self._pixel_mode:
             entry.update({

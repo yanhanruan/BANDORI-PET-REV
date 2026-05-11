@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent, QUrl
@@ -38,7 +39,7 @@ from app_theme import (
 
 import json
 
-from live2d_widget import Live2DWidget, normalize_live2d_quality
+from live2d_quality import normalize_live2d_quality
 
 _BG_LIGHT = "#ffffff"
 _BG_DARK = "#1e1e1e"
@@ -486,6 +487,8 @@ class CostumeItem(QPushButton):
 class Live2DPreviewBubble(QWidget):
     def __init__(self, live2d_module, quality_profile="balanced", parent=None):
         super().__init__(None)
+        from live2d_widget import Live2DWidget
+
         self._current_model_path = ""
         self.setWindowFlags(
             Qt.WindowType.Tool
@@ -684,6 +687,8 @@ class SettingsWindow(QWidget):
             self._current_costume = self._configured_models[0]["costume"]
         self._selected_band = model_manager.get_character_band(self._current_char)
         self._preview_bubble = None
+        self._owns_live2d = False
+        self._live2d_error_shown = False
         self._show_launch = show_launch
         self._start_on_costumes = start_on_costumes
         self._theme_widgets: list[QWidget] = []
@@ -778,12 +783,61 @@ class SettingsWindow(QWidget):
                 self._cfg.save()
 
     def closeEvent(self, event):
-        self._hide_costume_preview()
+        self._dispose_live2d_preview()
         self._cleanup_workers()
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
         super().closeEvent(event)
+
+    def _ensure_live2d_preview_module(self):
+        if self._live2d:
+            return self._live2d
+        try:
+            live2d_package = os.path.join(
+                str(app_base_dir()),
+                "third_party",
+                "live2d-py",
+                "package",
+            )
+            if live2d_package not in sys.path:
+                sys.path.insert(0, live2d_package)
+
+            import live2d.v2 as live2d
+            from platform_patch import PatchedPlatformManager
+
+            live2d.init()
+            live2d.Live2DFramework.setPlatformManager(
+                PatchedPlatformManager(live2d.Live2DFramework.getPlatformManager())
+            )
+            self._live2d = live2d
+            self._owns_live2d = True
+            return self._live2d
+        except Exception as exc:
+            if not self._live2d_error_shown:
+                self._live2d_error_shown = True
+                InfoBar.error(
+                    _tr("SettingsWindow.preview_failed_title"),
+                    _tr("SettingsWindow.preview_failed_content", error=str(exc)),
+                    duration=4000,
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+            return None
+
+    def _dispose_live2d_preview(self):
+        self._hide_costume_preview()
+        if self._preview_bubble is not None:
+            self._preview_bubble.close()
+            self._preview_bubble.deleteLater()
+            self._preview_bubble = None
+        if self._owns_live2d and self._live2d is not None:
+            try:
+                self._live2d.dispose()
+            except Exception:
+                pass
+            self._live2d = None
+            self._owns_live2d = False
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.KeyRelease and event.key() == Qt.Key.Key_Shift:
@@ -1097,7 +1151,7 @@ class SettingsWindow(QWidget):
         detail_center.addStretch(1)
 
         self._detail_card = CardWidget(self._model_detail_widget)
-        self._detail_card.setFixedSize(420, 440)
+        self._detail_card.setFixedSize(360, 440)
         card_layout = QVBoxLayout(self._detail_card)
         card_layout.setContentsMargins(26, 24, 26, 24)
         card_layout.setSpacing(12)
@@ -1129,6 +1183,20 @@ class SettingsWindow(QWidget):
         hint = BodyLabel("选择新的角色或服装", self._model_detail_widget)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         action_col.addWidget(hint)
+
+        motion_label = StrongBodyLabel("默认动作", self._model_detail_widget)
+        motion_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        action_col.addWidget(motion_label)
+        motion_row = QHBoxLayout()
+        motion_row.setSpacing(8)
+        self._default_motion_combo = ComboBox(self._model_detail_widget)
+        self._default_motion_combo.setMinimumWidth(190)
+        self._default_motion_combo.currentIndexChanged.connect(self._on_default_motion_changed)
+        motion_row.addWidget(self._default_motion_combo, 1)
+        self._default_motion_btn = PushButton("默认", self._model_detail_widget)
+        self._default_motion_btn.clicked.connect(self._reset_default_motion)
+        motion_row.addWidget(self._default_motion_btn)
+        action_col.addLayout(motion_row)
         action_col.addStretch(1)
 
         detail_center.addWidget(self._detail_card, 0, Qt.AlignmentFlag.AlignCenter)
@@ -1138,6 +1206,7 @@ class SettingsWindow(QWidget):
         detail_shell.addStretch(1)
 
         self._detail_action_hint = hint
+        self._detail_motion_label = motion_label
         self._update_switch_button_style()
         qconfig.themeChanged.connect(self._update_switch_button_style)
 
@@ -1160,6 +1229,7 @@ class SettingsWindow(QWidget):
             }}
         """)
         self._detail_action_hint.setStyleSheet(f"color: {hint_color};")
+        self._detail_motion_label.setStyleSheet(f"color: {hint_color};")
         self._switch_model_btn.setStyleSheet(f"""
             QPushButton {{
                 color: #ffffff;
@@ -1200,6 +1270,7 @@ class SettingsWindow(QWidget):
         self._detail_name.setText(display)
         self._detail_costume.setText(f"服装：{costume_name}")
         self._detail_band.setText(f"乐队：{band_name}" if band_name else "")
+        self._populate_default_motion_combo(item)
 
         pixmap = QPixmap(self._model_manager.get_character_image_path(character))
         if not pixmap.isNull():
@@ -1216,6 +1287,40 @@ class SettingsWindow(QWidget):
             if item["character"] == self._selected_list_character:
                 return item
         return None
+
+    def _populate_default_motion_combo(self, item: dict):
+        combo = self._default_motion_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("跟随模型默认", userData="")
+        motions = self._model_manager.get_motion_names(item["character"], item["costume"])
+        for motion in motions:
+            combo.addItem(motion, userData=motion)
+        current = item.get("default_motion", "")
+        if current not in motions:
+            current = ""
+            item["default_motion"] = ""
+        for idx in range(combo.count()):
+            if combo.itemData(idx) == current:
+                combo.setCurrentIndex(idx)
+                break
+        combo.blockSignals(False)
+
+    def _on_default_motion_changed(self, index: int):
+        item = self._selected_model_item()
+        if not item:
+            return
+        motion = self._default_motion_combo.itemData(index) or ""
+        item["default_motion"] = motion
+        self._save_configured_models()
+
+    def _reset_default_motion(self):
+        item = self._selected_model_item()
+        if not item:
+            return
+        item["default_motion"] = ""
+        self._populate_default_motion_combo(item)
+        self._save_configured_models()
 
     def _enter_model_selection(self):
         self._selecting_model = True
@@ -1732,6 +1837,23 @@ class SettingsWindow(QWidget):
         self._live2d_quality = normalize_live2d_quality(profile)
         self._quality_detail.setText(self._quality_detail_text(self._live2d_quality))
 
+    def _llm_config_widgets_ready(self) -> bool:
+        return all(
+            hasattr(self, attr)
+            for attr in (
+                "_llm_api_url",
+                "_llm_api_key",
+                "_llm_model_id",
+                "_llm_aux_model_id",
+                "_llm_enable_thinking",
+                "_llm_show_reasoning",
+                "_user_name",
+                "_pov_mode",
+                "_pov_custom_prompt",
+                "_pov_role_character",
+                "_avatar_color_btns",
+            )
+        )
     def _set_live2d_scale_controls(self, value: int):
         value = _clamp_live2d_scale(value)
         self._live2d_scale = value
@@ -1747,6 +1869,8 @@ class SettingsWindow(QWidget):
         self._set_live2d_scale_controls(self._live2d_scale_input.text())
 
     def _style_llm_inputs(self):
+        if not self._llm_config_widgets_ready():
+            return
         dark = isDarkTheme()
         input_bg = "#282828" if dark else "#ffffff"
         input_border = "#505050" if dark else "#d0d0d0"
@@ -1824,7 +1948,7 @@ class SettingsWindow(QWidget):
         anim.start()
 
     def _load_llm_config(self):
-        if self._cfg:
+        if self._cfg and self._llm_config_widgets_ready():
             self._llm_api_url.setText(self._cfg.get("llm_api_url", ""))
             self._llm_api_key.setText(self._cfg.get("llm_api_key", ""))
             self._llm_model_id.setText(self._cfg.get("llm_model_id", ""))
@@ -1871,7 +1995,7 @@ class SettingsWindow(QWidget):
         self._user_name.setText(self._pov_role_character.currentText())
 
     def _save_llm_config(self):
-        if self._cfg:
+        if self._cfg and self._llm_config_widgets_ready():
             self._cfg.set("llm_api_url", self._llm_api_url.text().strip())
             self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
             self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
@@ -2299,6 +2423,7 @@ class SettingsWindow(QWidget):
             "pixel_window_x": -1,
             "pixel_window_y": -1,
             "pet_mode": "live2d",
+            "default_motion": "",
         }
         replace_index = self._editing_model_index
         if replace_index is None and not self._adding_model:
@@ -2317,6 +2442,7 @@ class SettingsWindow(QWidget):
                 "window_height",
                 "pixel_window_x",
                 "pixel_window_y",
+                "default_motion",
             ):
                 if key in self._configured_models[replace_index]:
                     preserved[key] = self._configured_models[replace_index][key]
@@ -2334,6 +2460,7 @@ class SettingsWindow(QWidget):
                         "window_height",
                         "pixel_window_x",
                         "pixel_window_y",
+                        "default_motion",
                     ):
                         if key in item:
                             preserved[key] = item[key]
@@ -2409,13 +2536,14 @@ class SettingsWindow(QWidget):
         self._show_model_detail()
 
     def _show_costume_preview(self, anchor: QWidget, costume_id: str):
-        if not self._live2d:
+        live2d_module = self._ensure_live2d_preview_module()
+        if not live2d_module:
             return
         model_path = self._model_manager.get_model_json_path(self._current_char, costume_id)
         if not model_path:
             return
         if self._preview_bubble is None:
-            self._preview_bubble = Live2DPreviewBubble(self._live2d, self._live2d_quality, self)
+            self._preview_bubble = Live2DPreviewBubble(live2d_module, self._live2d_quality, self)
         self._preview_bubble.set_render_quality(self._live2d_quality)
         self._preview_bubble.show_preview(model_path, anchor)
 
