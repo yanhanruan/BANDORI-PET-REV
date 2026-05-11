@@ -12,6 +12,18 @@ from qfluentwidgets import Action, BodyLabel, StrongBodyLabel, FluentIcon, Round
 from qfluentwidgets.components.widgets.menu import TextEditMenu
 from qfluentwidgets.common.config import qconfig
 from process_utils import app_base_dir
+from app_theme import (
+    BANDORI_PRIMARY,
+    BANDORI_PRIMARY_HOVER,
+    BANDORI_PRIMARY_PRESSED,
+    BANDORI_PRIMARY_DARK,
+    BANDORI_PRIMARY_DARK_HOVER,
+    BANDORI_PRIMARY_DARK_PRESSED,
+    BANDORI_PRIMARY_SOFT,
+    BANDORI_PRIMARY_SOFT_DARK,
+    BANDORI_PRIMARY_SOFT_DARK_HOVER,
+    accent_color,
+)
 
 import ctypes
 import ctypes.wintypes
@@ -30,12 +42,12 @@ from action_bus import publish_action
 _BG_LIGHT = "#f5f7fb"
 _BG_DARK = "#0f1117"
 
-_USER_BUBBLE_LIGHT = "#e6f0ff"
-_USER_BUBBLE_DARK = "#1f355c"
+_USER_BUBBLE_LIGHT = BANDORI_PRIMARY_SOFT
+_USER_BUBBLE_DARK = BANDORI_PRIMARY_SOFT_DARK
 _ASSIST_BUBBLE_LIGHT = "#ffffff"
 _ASSIST_BUBBLE_DARK = "#1b1f29"
 _TEAMS_ACCENT = "#6264a7"
-_TELEGRAM_ACCENT = "#2aabee"
+_TELEGRAM_ACCENT = BANDORI_PRIMARY
 
 DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWA_BORDER_COLOR = 34
@@ -174,9 +186,9 @@ class IconButton(QToolButton):
     def apply_theme(self):
         dark = isDarkTheme()
         if self._primary:
-            bg = _TELEGRAM_ACCENT
-            hover = "#45bdf2"
-            pressed = "#168fca"
+            bg = accent_color(dark)
+            hover = BANDORI_PRIMARY_DARK_HOVER if dark else BANDORI_PRIMARY_HOVER
+            pressed = BANDORI_PRIMARY_DARK_PRESSED if dark else BANDORI_PRIMARY_PRESSED
             fg = "#ffffff"
         else:
             bg = "#2a2f3b" if dark else "#edf2fb"
@@ -238,7 +250,7 @@ class ConversationHistoryRow(QWidget):
 
     def apply_theme(self):
         dark = isDarkTheme()
-        bg = "#263044" if self._current and dark else "#eef4ff" if self._current else "transparent"
+        bg = BANDORI_PRIMARY_SOFT_DARK if self._current and dark else BANDORI_PRIMARY_SOFT if self._current else "transparent"
         text = "#f7f7fb" if dark else "#1f2328"
         marker = _TELEGRAM_ACCENT if self._current else "transparent"
         danger = "#ff6b6b" if dark else "#c42b1c"
@@ -283,7 +295,7 @@ class ConversationHistoryRow(QWidget):
         eff = self.graphicsEffect()
         if not isinstance(eff, QGraphicsColorizeEffect):
             eff = QGraphicsColorizeEffect(self)
-            eff.setColor(QColor(96, 205, 255))
+            eff.setColor(QColor(BANDORI_PRIMARY_DARK))
             eff.setStrength(0.0)
             self.setGraphicsEffect(eff)
         self._hover_anim = QPropertyAnimation(eff, b"strength")
@@ -493,7 +505,7 @@ class MessageBubble(QWidget):
         border = "#39415a" if dark else "#e4e7ef"
         text = "#f7f7fb" if dark else "#1f2328"
         meta = "#a9b0c3" if dark else "#657089"
-        stream = "#82cfff" if dark else "#5470c6"
+        stream = BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY
         reasoning_bg = "#22283a" if dark else "#f1f5ff"
         reasoning_border = "#31394e" if dark else "#d9e3f6"
         reasoning_text = "#cbd3e8" if dark else "#4e5b75"
@@ -934,7 +946,7 @@ class ChatWindow(QWidget):
         self._composer_colors = {
             "bg": input_bg,
             "border": input_border,
-            "focus_border": _TELEGRAM_ACCENT if not dark else "#7dd7ff",
+            "focus_border": accent_color(dark),
         }
 
         self.setStyleSheet(f"""
@@ -1061,7 +1073,7 @@ class ChatWindow(QWidget):
         menu.setObjectName("ConversationHistoryMenu")
         dark = isDarkTheme()
         bg = "#1b1f29" if dark else "#ffffff"
-        hover = "#263044" if dark else "#eef4ff"
+        hover = BANDORI_PRIMARY_SOFT_DARK_HOVER if dark else BANDORI_PRIMARY_SOFT
         border = "#303849" if dark else "#d8deea"
         text = "#f7f7fb" if dark else "#1f2328"
         muted = "#9aa5bd" if dark else "#657089"
