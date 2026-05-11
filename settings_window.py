@@ -245,7 +245,8 @@ class CharacterCard(CardWidget):
     char_selected = Signal(str)
 
     def __init__(self, char_key: str, display_name: str, costume_count: int,
-                 image_path: str = "", roleplay_status: str = "red", parent=None):
+                 image_path: str = "", roleplay_status: str = "red", parent=None,
+                 image_data: bytes = b""):
         super().__init__(parent)
         self._char_key = char_key
         self._disabled_for_existing = False
@@ -260,6 +261,8 @@ class CharacterCard(CardWidget):
         layout.setSpacing(8)
 
         image = QPixmap(image_path) if image_path else QPixmap()
+        if image.isNull() and image_data:
+            image.loadFromData(image_data)
         if not image.isNull():
             image_label = QLabel(self)
             image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1293,6 +1296,9 @@ class SettingsWindow(QWidget):
         self._populate_default_expression_combo(item)
 
         pixmap = QPixmap(self._model_manager.get_character_image_path(character))
+        image_data = self._model_manager.get_character_image_data(character)
+        if pixmap.isNull() and image_data:
+            pixmap.loadFromData(image_data)
         if not pixmap.isNull():
             self._detail_image.setPixmap(pixmap.scaled(
                 self._detail_image.size(),
@@ -1465,10 +1471,12 @@ class SettingsWindow(QWidget):
                 continue
             display = self._model_manager.get_display_name(char_key)
             image_path = self._model_manager.get_character_image_path(char_key)
+            image_data = self._model_manager.get_character_image_data(char_key)
             card = CharacterCard(
                 char_key, display, len(costumes), image_path,
                 "green" if self._model_manager.has_advanced_roleplay(char_key) else "red",
-                self._selection_grid_widget
+                self._selection_grid_widget,
+                image_data=image_data,
             )
             card.set_disabled_for_existing(char_key in configured_characters)
             card.char_selected.connect(self._on_char_selected)

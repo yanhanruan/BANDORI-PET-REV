@@ -1,6 +1,15 @@
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from process_utils import app_base_dir
+from zst_model_archive import (
+    is_virtual_path,
+    list_archive_files,
+    load_virtual_bytes,
+    load_virtual_json,
+    make_virtual_path,
+)
 
 BASE_DIR = app_base_dir()
 MODELS_DIR = BASE_DIR / "models"
@@ -10,6 +19,9 @@ CHARACTERS_DIR = BASE_DIR / "characters"
 
 
 class ModelManager:
+    _model_paths: dict[tuple[str, str], str] = {}
+    _character_images: dict[str, str] = {}
+
     def __init__(self):
         self._characters: dict[str, dict] = {}
         self._costume_names: dict[str, dict[str, str]] = {}
@@ -41,24 +53,92 @@ class ModelManager:
         return support
 
     def _scan(self):
-        for entry in sorted(MODELS_DIR.iterdir()):
-            if not entry.is_dir() or entry.name.startswith("_"):
-                continue
-            char_name = entry.name
-            costumes = []
-            for costume_dir in sorted(entry.iterdir()):
-                if not costume_dir.is_dir():
+        ModelManager._model_paths = {}
+        ModelManager._character_images = {}
+        entries = [entry for entry in sorted(MODELS_DIR.iterdir()) if not entry.name.startswith("_")]
+        for entry in entries:
+            if entry.is_dir():
+                self._scan_model_dir(entry)
+
+        archive_paths = []
+        for entry in entries:
+            if entry.is_file() and entry.suffix.lower() == ".zst":
+                if entry.stem in self._characters:
                     continue
-                model_json = costume_dir / "model.json"
-                if model_json.exists():
-                    costumes.append({
-                        "id": costume_dir.name,
-                        "path": str(model_json.resolve()),
-                    })
-            if costumes:
-                self._characters[char_name] = {
-                    "costumes": costumes,
-                }
+                archive_paths.append(entry)
+
+        if not archive_paths:
+            return
+
+        max_workers = min(len(archive_paths), os.cpu_count() or 1)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(self._read_model_archive, archive_paths):
+                if result is not None:
+                    self._apply_archive_scan_result(result)
+
+    def _scan_model_dir(self, entry: Path):
+        char_name = entry.name
+        costumes = []
+        for costume_dir in sorted(entry.iterdir()):
+            if not costume_dir.is_dir():
+                continue
+            model_json = costume_dir / "model.json"
+            if model_json.exists():
+                model_path = str(model_json.resolve())
+                costumes.append({
+                    "id": costume_dir.name,
+                    "path": model_path,
+                })
+                ModelManager._model_paths[(char_name, costume_dir.name)] = model_path
+        image_path = self._find_dir_character_image(entry)
+        if image_path:
+            ModelManager._character_images[char_name] = image_path
+        if costumes:
+            self._characters[char_name] = {
+                "costumes": costumes,
+            }
+
+    def _read_model_archive(self, archive_path: Path):
+        char_name = archive_path.stem
+        try:
+            files = list_archive_files(archive_path)
+        except Exception as exc:
+            print(f"Failed to scan model archive {archive_path}: {exc}")
+            return None
+
+        costumes = []
+        model_paths = []
+        for member in files:
+            if Path(member).name != "model.json":
+                continue
+            parent = Path(member).parent
+            costume_id = parent.name if str(parent) != "." else "default"
+            model_path = make_virtual_path(archive_path, member)
+            costumes.append({
+                "id": costume_id,
+                "path": model_path,
+            })
+            model_paths.append((char_name, costume_id, model_path))
+
+        image_path = self._find_archive_character_image(archive_path, files, char_name)
+        if not costumes:
+            return None
+        return {
+            "character": char_name,
+            "costumes": sorted(costumes, key=lambda item: item["id"]),
+            "image_path": image_path,
+            "model_paths": model_paths,
+        }
+
+    def _apply_archive_scan_result(self, result: dict):
+        for char_name, costume_id, model_path in result["model_paths"]:
+            ModelManager._model_paths[(char_name, costume_id)] = model_path
+        image_path = result["image_path"]
+        if image_path:
+            ModelManager._character_images[result["character"]] = image_path
+        self._characters[result["character"]] = {
+            "costumes": result["costumes"],
+        }
 
     def _parse_outfit_json(self):
         if not OUTFIT_JSON.exists():
@@ -158,11 +238,43 @@ class ModelManager:
 
     @staticmethod
     def get_character_image_path(character: str) -> str:
+        image_path = ModelManager._character_images.get(character, "")
+        if image_path:
+            return "" if is_virtual_path(image_path) else image_path
         char_dir = MODELS_DIR / character
+        return ModelManager._find_dir_character_image(char_dir)
+
+    @staticmethod
+    def get_character_image_data(character: str) -> bytes:
+        image_path = ModelManager._character_images.get(character, "")
+        if not is_virtual_path(image_path):
+            return b""
+        try:
+            return load_virtual_bytes(image_path)
+        except Exception as exc:
+            print(f"Failed to load archive character image {image_path}: {exc}")
+            return b""
+
+    @staticmethod
+    def _find_dir_character_image(char_dir: Path) -> str:
         for ext in ("png", "jpg", "webp"):
             path = char_dir / f"character.{ext}"
             if path.exists():
                 return str(path.resolve())
+        return ""
+
+    @staticmethod
+    def _find_archive_character_image(archive_path: Path, files: list[str], character: str) -> str:
+        candidates = []
+        for ext in ("png", "jpg", "webp"):
+            candidates.extend([
+                f"character.{ext}",
+                f"{character}/character.{ext}",
+            ])
+        file_set = set(files)
+        for candidate in candidates:
+            if candidate in file_set:
+                return make_virtual_path(archive_path, candidate)
         return ""
 
     def get_costumes(self, character: str) -> list[dict]:
@@ -184,18 +296,27 @@ class ModelManager:
 
     @staticmethod
     def get_model_json_path(character: str, costume: str) -> str:
+        model_path = ModelManager._model_paths.get((character, costume), "")
+        if model_path:
+            return model_path
         path = MODELS_DIR / character / costume / "model.json"
         if path.exists():
             return str(path.resolve())
         return ""
+
+    @staticmethod
+    def _read_model_json(path: str) -> dict:
+        if is_virtual_path(path):
+            return load_virtual_json(path)
+        return json.loads(Path(path).read_text(encoding="utf-8"))
 
     def get_motion_names(self, character: str, costume: str) -> list[str]:
         path = self.get_model_json_path(character, costume)
         if not path:
             return []
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            data = self._read_model_json(path)
+        except Exception:
             return []
         motions = data.get("motions", {})
         if not isinstance(motions, dict):
@@ -207,8 +328,8 @@ class ModelManager:
         if not path:
             return []
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            data = self._read_model_json(path)
+        except Exception:
             return []
         expressions = data.get("expressions", [])
         if not isinstance(expressions, list):

@@ -1,8 +1,10 @@
 import os
+import io
 
 import OpenGL.GL as gl
 from PIL import Image
 from process_utils import app_base_dir
+from zst_model_archive import is_virtual_path, load_virtual_bytes
 
 BASE_DIR = str(app_base_dir())
 MODELS_DIR = os.path.join(BASE_DIR, "models")
@@ -95,6 +97,14 @@ class PatchedPlatformManager:
         self._original = original_pm
 
     def loadBytes(self, path) -> bytes:
+        if is_virtual_path(path):
+            try:
+                return load_virtual_bytes(path)
+            except KeyError:
+                fixed = self._fix_mtn_path(path)
+                if fixed:
+                    return self._original.loadBytes(fixed)
+                raise
         if not os.path.exists(path):
             fixed = self._fix_mtn_path(path)
             if fixed:
@@ -102,10 +112,16 @@ class PatchedPlatformManager:
         return self._original.loadBytes(path)
 
     def loadLive2DModel(self, path, version, disable_precision):
+        if is_virtual_path(path):
+            from live2d.v2.core import Live2DModelOpenGL
+            return Live2DModelOpenGL.loadModel(load_virtual_bytes(path), version, disable_precision)
         return self._original.loadLive2DModel(path, version, disable_precision)
 
     def loadTexture(self, live2DModel, no, path):
-        image = Image.open(path)
+        if is_virtual_path(path):
+            image = Image.open(io.BytesIO(load_virtual_bytes(path)))
+        else:
+            image = Image.open(path)
         if image.mode != "RGBA":
             image = image.convert("RGBA")
         image = _bleed_transparent_edges(image)

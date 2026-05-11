@@ -9,3 +9,6 @@ third_party/
 venv/
 config.json
 data.*
+*.zip
+*.7z
+*.rar
