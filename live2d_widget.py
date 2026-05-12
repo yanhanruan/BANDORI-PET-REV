@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, QPoint, QElapsedTimer, QTimer, Signal
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from live2d_quality import LIVE2D_QUALITY_PROFILES, normalize_live2d_quality
+from lua_hit_area_projection import LuaCustomHitAreaState
 from platform_patch import set_live2d_texture_quality
 from zst_model_archive import clear_virtual_byte_cache, is_virtual_path, prefetch_virtual_model_resources
 
@@ -70,8 +71,7 @@ class Live2DWidget(QOpenGLWidget):
         self._hit_pbo_size = 4
         self._hit_clock = QElapsedTimer()
         self._hit_clock.start()
-        self._custom_hit_areas_scene = ()
-        self._custom_hit_areas = ()
+        self._custom_hit_areas = LuaCustomHitAreaState()
         self._render_timer = QTimer(self)
         self._render_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._render_timer.timeout.connect(self.update)
@@ -175,7 +175,7 @@ class Live2DWidget(QOpenGLWidget):
             disable_precision = LIVE2D_QUALITY_PROFILES[self._quality_profile]["disable_precision"]
             self._model = self._live2d.LAppModel()
             self._model.LoadModelJson(model_json_path, disable_precision=disable_precision)
-            self._custom_hit_areas_scene = self._prepare_custom_hit_areas(self._model)
+            self._custom_hit_areas.set_scene_areas(self._prepare_custom_hit_areas(self._model))
             self._model.Resize(self._cache_w, self._cache_h)
             self._update_custom_hit_area_projection()
             self._model_path = model_json_path
@@ -185,8 +185,7 @@ class Live2DWidget(QOpenGLWidget):
             print(f"Failed to load model: {e}")
             self._model = None
             self._model_path = ""
-            self._custom_hit_areas_scene = ()
-            self._custom_hit_areas = ()
+            self._custom_hit_areas.clear()
             self._update_render_timer()
 
     def _frame_interval_ms(self) -> int:
@@ -224,49 +223,21 @@ class Live2DWidget(QOpenGLWidget):
 
     def _update_custom_hit_area_projection(self):
         model = self._model
-        scene_areas = self._custom_hit_areas_scene
-        if not model or not scene_areas:
-            self._custom_hit_areas = ()
+        if not model or not self._custom_hit_areas.has_scene_areas():
+            self._custom_hit_areas.clear_projected()
             return
         try:
             matrix = model.matrixManager
-            c0x, c0y = matrix.screenToScene(0.0, 0.0)
-            c1x, c1y = matrix.screenToScene(float(self._cache_w), 0.0)
-            c2x, c2y = matrix.screenToScene(0.0, float(self._cache_h))
-            ax = c1x - c0x
-            ay = c1y - c0y
-            bx = c2x - c0x
-            by = c2y - c0y
-            det = ax * by - bx * ay
-            if det == 0:
-                self._custom_hit_areas = ()
-                return
-
-            inv_det = 1.0 / det
-
-            def scene_to_screen(sx: float, sy: float):
-                dx = sx - c0x
-                dy = sy - c0y
-                return (
-                    (by * dx - bx * dy) * inv_det * self._cache_w,
-                    (-ay * dx + ax * dy) * inv_det * self._cache_h,
-                )
-
-            projected = []
-            for min_x, max_x, min_y, max_y in scene_areas:
-                p0x, p0y = scene_to_screen(min_x, min_y)
-                p1x, p1y = scene_to_screen(min_x, max_y)
-                p2x, p2y = scene_to_screen(max_x, min_y)
-                p3x, p3y = scene_to_screen(max_x, max_y)
-                projected.append((
-                    min(p0x, p1x, p2x, p3x),
-                    max(p0x, p1x, p2x, p3x),
-                    min(p0y, p1y, p2y, p3y),
-                    max(p0y, p1y, p2y, p3y),
-                ))
-            self._custom_hit_areas = tuple(projected)
+            if not self._custom_hit_areas.project(
+                matrix.screenToScene(0.0, 0.0),
+                matrix.screenToScene(float(self._cache_w), 0.0),
+                matrix.screenToScene(0.0, float(self._cache_h)),
+                self._cache_w,
+                self._cache_h,
+            ):
+                self._custom_hit_areas.clear_projected()
         except Exception:
-            self._custom_hit_areas = ()
+            self._custom_hit_areas.clear_projected()
 
     @property
     def model(self):
@@ -494,7 +465,7 @@ class Live2DWidget(QOpenGLWidget):
         return self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)
 
     def _has_model_hit_areas(self) -> bool:
-        return self._has_sdk_hit_areas() or bool(self._custom_hit_areas)
+        return self._has_sdk_hit_areas() or self._custom_hit_areas.has_projected_areas()
 
     def _has_sdk_hit_areas(self) -> bool:
         model = self._model
@@ -514,13 +485,7 @@ class Live2DWidget(QOpenGLWidget):
             return False
 
     def _is_in_custom_hit_area(self, x: float, y: float) -> bool:
-        areas = self._custom_hit_areas
-        if not areas:
-            return False
-        for min_x, max_x, min_y, max_y in areas:
-            if min_x <= x <= max_x and min_y <= y <= max_y:
-                return True
-        return False
+        return self._custom_hit_areas.hit_test(x, y)
 
     def _clear_hit_framebuffer_cache(self):
         self._hit_alpha_cache.clear()

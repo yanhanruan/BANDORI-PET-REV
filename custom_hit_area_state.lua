@@ -1,0 +1,87 @@
+return function()
+    local state = {
+        scene_areas = {},
+        projected_areas = {},
+    }
+
+    function state:clear()
+        self.scene_areas = {}
+        self.projected_areas = {}
+    end
+
+    function state:clear_projected()
+        self.projected_areas = {}
+    end
+
+    function state:set_scene_areas(scene_areas)
+        self.scene_areas = scene_areas or {}
+        self.projected_areas = {}
+    end
+
+    function state:has_scene_areas()
+        return #self.scene_areas > 0
+    end
+
+    function state:has_projected_areas()
+        return #self.projected_areas > 0
+    end
+
+    function state:project(c0x, c0y, c1x, c1y, c2x, c2y, width, height)
+        local projected = {}
+        self.projected_areas = projected
+
+        local ax = c1x - c0x
+        local ay = c1y - c0y
+        local bx = c2x - c0x
+        local by = c2y - c0y
+        local det = ax * by - bx * ay
+        if det == 0 then
+            return false
+        end
+
+        local inv_det = 1.0 / det
+
+        for i = 1, #self.scene_areas do
+            local area = self.scene_areas[i]
+            local min_x = area[1]
+            local max_x = area[2]
+            local min_y = area[3]
+            local max_y = area[4]
+
+            local dx0 = min_x - c0x
+            local dx1 = max_x - c0x
+            local dy0 = min_y - c0y
+            local dy1 = max_y - c0y
+
+            local p0x = (by * dx0 - bx * dy0) * inv_det * width
+            local p0y = (-ay * dx0 + ax * dy0) * inv_det * height
+            local p1x = (by * dx0 - bx * dy1) * inv_det * width
+            local p1y = (-ay * dx0 + ax * dy1) * inv_det * height
+            local p2x = (by * dx1 - bx * dy0) * inv_det * width
+            local p2y = (-ay * dx1 + ax * dy0) * inv_det * height
+            local p3x = (by * dx1 - bx * dy1) * inv_det * width
+            local p3y = (-ay * dx1 + ax * dy1) * inv_det * height
+
+            projected[#projected + 1] = {
+                math.min(p0x, p1x, p2x, p3x),
+                math.max(p0x, p1x, p2x, p3x),
+                math.min(p0y, p1y, p2y, p3y),
+                math.max(p0y, p1y, p2y, p3y),
+            }
+        end
+
+        return true
+    end
+
+    function state:hit_test(x, y)
+        for i = 1, #self.projected_areas do
+            local area = self.projected_areas[i]
+            if area[1] <= x and x <= area[2] and area[3] <= y and y <= area[4] then
+                return true
+            end
+        end
+        return false
+    end
+
+    return state
+end

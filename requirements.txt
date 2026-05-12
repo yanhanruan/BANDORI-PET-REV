@@ -5,3 +5,4 @@ numpy>=1.24.0
 darkdetect>=0.8.0
 PySideSix-Frameless-Window>=0.8.0
 zstandard>=0.22.0
+lupa>=2.2
