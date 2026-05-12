@@ -260,7 +260,7 @@ class PixelPetWidget(QWidget):
             return
         if self._dragging:
             self._dragging = False
-        elif self._click_callback:
+        elif self._click_callback and self.is_sprite_hit_at_global(event.globalPosition().toPoint()):
             self._click_callback()
 
     def mouseMoveEvent(self, event: QMouseEvent):

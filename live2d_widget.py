@@ -231,8 +231,8 @@ class Live2DWidget(QOpenGLWidget):
         try:
             matrix = model.matrixManager
             c0x, c0y = matrix.screenToScene(0.0, 0.0)
-            c1x, c1y = matrix.screenToScene(1.0, 0.0)
-            c2x, c2y = matrix.screenToScene(0.0, 1.0)
+            c1x, c1y = matrix.screenToScene(float(self._cache_w), 0.0)
+            c2x, c2y = matrix.screenToScene(0.0, float(self._cache_h))
             ax = c1x - c0x
             ay = c1y - c0y
             bx = c2x - c0x
@@ -247,7 +247,10 @@ class Live2DWidget(QOpenGLWidget):
             def scene_to_screen(sx: float, sy: float):
                 dx = sx - c0x
                 dy = sy - c0y
-                return ((by * dx - bx * dy) * inv_det, (-ay * dx + ax * dy) * inv_det)
+                return (
+                    (by * dx - bx * dy) * inv_det * self._cache_w,
+                    (-ay * dx + ax * dy) * inv_det * self._cache_h,
+                )
 
             projected = []
             for min_x, max_x, min_y, max_y in scene_areas:
@@ -410,7 +413,10 @@ class Live2DWidget(QOpenGLWidget):
             return
         if self._dragging:
             self._dragging = False
-        elif self._click_callback:
+        elif self._click_callback and self._is_model_hit_at(
+            event.scenePosition().x(),
+            event.scenePosition().y(),
+        ):
             self._click_callback()
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -428,8 +434,6 @@ class Live2DWidget(QOpenGLWidget):
     def alpha_at_global(self, global_pos: QPoint) -> int:
         local = self.mapFromGlobal(global_pos)
         if not self.rect().contains(local):
-            return 0
-        if not self._is_in_model_hit_area(local.x(), local.y()):
             return 0
         alpha = self._get_alpha_fast(local.x(), local.y())
         return 0 if alpha is None else alpha
@@ -455,7 +459,7 @@ class Live2DWidget(QOpenGLWidget):
         return state is True
 
     def _hit_state_at_sync(self, x: float, y: float) -> bool:
-        if not self._model or not self._is_in_model_hit_area(x, y):
+        if not self._model:
             self._last_hit_state = False
             return False
         alpha = self._alpha_near_sync(x, y)
@@ -464,7 +468,7 @@ class Live2DWidget(QOpenGLWidget):
         return self._last_hit_state
 
     def _hit_state_at(self, x: float, y: float):
-        if not self._model or not self._is_in_model_hit_area(x, y):
+        if not self._model:
             self._last_hit_state = False
             return False
         now = self._hit_clock.elapsed()
@@ -479,13 +483,25 @@ class Live2DWidget(QOpenGLWidget):
         return self._last_hit_state
 
     def _is_in_model_hit_area(self, x: float, y: float) -> bool:
+        if not self._has_model_hit_areas():
+            return True
         return self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)
+
+    def _has_model_hit_areas(self) -> bool:
+        return self._has_sdk_hit_areas() or bool(self._custom_hit_areas)
+
+    def _has_sdk_hit_areas(self) -> bool:
+        model = self._model
+        try:
+            setting = getattr(model, "modelSetting", None)
+            return setting is not None and setting.getHitAreaNum() > 0
+        except Exception:
+            return False
 
     def _is_in_sdk_hit_area(self, x: float, y: float) -> bool:
         model = self._model
         try:
-            setting = getattr(model, "modelSetting", None)
-            if setting is None or setting.getHitAreaNum() <= 0:
+            if not self._has_sdk_hit_areas():
                 return False
             return model.HitTest("", x, y) is not None
         except Exception:
@@ -664,9 +680,6 @@ class Live2DWidget(QOpenGLWidget):
             return 0
         if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
             return 0
-        if not (self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)):
-            return 0
-
         try:
             self._safe_make_current()
             self._process_hit_pbo_results()
@@ -692,9 +705,6 @@ class Live2DWidget(QOpenGLWidget):
             return 0
         if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
             return 0
-        if not (self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)):
-            return 0
-
         try:
             self._safe_make_current()
             self._init_hit_pbos()
