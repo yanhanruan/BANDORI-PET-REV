@@ -713,6 +713,7 @@ class SettingsWindow(QWidget):
         self._current_page = "characters"
         self._selecting_model = False
         self._vsync = vsync
+        self._game_topmost = bool(self._cfg.get("game_topmost", False)) if self._cfg else False
         self._live2d_quality = normalize_live2d_quality(
             self._cfg.get("live2d_quality", "balanced") if self._cfg else "balanced"
         )
@@ -1148,22 +1149,21 @@ class SettingsWindow(QWidget):
         detail_shell = QVBoxLayout(self._model_detail_widget)
         detail_shell.setContentsMargins(0, 0, 0, 0)
         detail_shell.setSpacing(0)
-        detail_shell.addStretch(1)
 
         detail_center = QHBoxLayout()
         detail_center.setContentsMargins(0, 0, 0, 0)
-        detail_center.setSpacing(20)
+        detail_center.setSpacing(12)
         detail_center.addStretch(1)
 
         self._detail_card = CardWidget(self._model_detail_widget)
-        self._detail_card.setFixedSize(300, 440)
+        self._detail_card.setFixedSize(280, 420)
         card_layout = QVBoxLayout(self._detail_card)
         card_h_margin = 26
-        card_layout.setContentsMargins(card_h_margin, 24, card_h_margin, 24)
+        card_layout.setContentsMargins(card_h_margin, 22, card_h_margin, 22)
         card_layout.setSpacing(12)
 
         self._detail_image = QLabel(self._detail_card)
-        self._detail_image.setFixedSize(self._detail_card.width() - card_h_margin * 2, 285)
+        self._detail_image.setFixedSize(self._detail_card.width() - card_h_margin * 2, 260)
         self._detail_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(self._detail_image, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -1180,9 +1180,12 @@ class SettingsWindow(QWidget):
         action_scroll = ScrollArea(self._model_detail_widget)
         action_scroll.setWidgetResizable(True)
         action_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        action_scroll.setMinimumWidth(500)
-        action_scroll.setMaximumWidth(540)
+        action_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        action_scroll.setFixedWidth(320)
+        action_scroll.setFixedHeight(self._detail_card.height())
+        action_scroll.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         action_container = self._make_theme_widget(QWidget(action_scroll))
+        action_container.setFixedWidth(292)
         action_col = QVBoxLayout(action_container)
         action_col.setContentsMargins(0, 0, 0, 0)
         action_col.setSpacing(10)
@@ -1238,28 +1241,31 @@ class SettingsWindow(QWidget):
         click_grid.setVerticalSpacing(6)
         self._click_motion_combos = {}
         self._click_expression_combos = {}
-        click_grid.addWidget(BodyLabel(_tr("SettingsWindow.click_motion_column_motion"), click_grid_widget), 0, 1)
-        click_grid.addWidget(BodyLabel(_tr("SettingsWindow.click_motion_column_expression"), click_grid_widget), 0, 2)
-        for row, region in enumerate(CLICK_MOTION_REGIONS, start=1):
+        click_grid.addWidget(BodyLabel(_tr("SettingsWindow.click_motion_column_motion"), click_grid_widget), 0, 0)
+        click_grid.addWidget(BodyLabel(_tr("SettingsWindow.click_motion_column_expression"), click_grid_widget), 0, 1)
+        for index, region in enumerate(CLICK_MOTION_REGIONS):
+            row = index * 2 + 1
             label = BodyLabel(_tr(f"SettingsWindow.click_motion_region_{region}"), click_grid_widget)
-            label.setMinimumWidth(150)
+            label.setWordWrap(True)
             combo = ComboBox(click_grid_widget)
-            combo.setMinimumWidth(150)
+            combo.setMinimumWidth(135)
+            combo.setMaximumWidth(140)
             combo.currentIndexChanged.connect(
                 lambda index, r=region: self._on_click_motion_changed(r, index)
             )
             expression_combo = ComboBox(click_grid_widget)
-            expression_combo.setMinimumWidth(150)
+            expression_combo.setMinimumWidth(135)
+            expression_combo.setMaximumWidth(140)
             expression_combo.currentIndexChanged.connect(
                 lambda index, r=region: self._on_click_expression_changed(r, index)
             )
             self._click_motion_combos[region] = combo
             self._click_expression_combos[region] = expression_combo
-            click_grid.addWidget(label, row, 0)
-            click_grid.addWidget(combo, row, 1)
-            click_grid.addWidget(expression_combo, row, 2)
+            click_grid.addWidget(label, row, 0, 1, 2)
+            click_grid.addWidget(combo, row + 1, 0)
+            click_grid.addWidget(expression_combo, row + 1, 1)
+        click_grid.setColumnStretch(0, 1)
         click_grid.setColumnStretch(1, 1)
-        click_grid.setColumnStretch(2, 1)
         action_col.addWidget(click_grid_widget)
 
         self._click_motion_reset_btn = PushButton(_tr("SettingsWindow.click_motion_reset"), action_container)
@@ -1267,11 +1273,10 @@ class SettingsWindow(QWidget):
         action_col.addWidget(self._click_motion_reset_btn, 0, Qt.AlignmentFlag.AlignRight)
         action_scroll.setWidget(action_container)
 
-        detail_center.addWidget(self._detail_card, 0, Qt.AlignmentFlag.AlignCenter)
-        detail_center.addWidget(action_scroll, 0, Qt.AlignmentFlag.AlignCenter)
+        detail_center.addWidget(self._detail_card, 0, Qt.AlignmentFlag.AlignTop)
+        detail_center.addWidget(action_scroll, 0, Qt.AlignmentFlag.AlignTop)
         detail_center.addStretch(1)
-        detail_shell.addLayout(detail_center)
-        detail_shell.addStretch(1)
+        detail_shell.addLayout(detail_center, 1)
 
         self._detail_action_hint = hint
         self._detail_motion_label = motion_label
@@ -2474,6 +2479,15 @@ class SettingsWindow(QWidget):
             self._fps_slider.setEnabled(False)
             self._fps_value.setEnabled(False)
 
+        game_topmost_label = BodyLabel(_tr("SettingsWindow.side_game_topmost"), panel)
+        self._game_topmost_switch = SwitchButton(panel)
+        self._game_topmost_switch.setChecked(self._game_topmost)
+        game_topmost_row = QHBoxLayout()
+        game_topmost_row.addWidget(game_topmost_label)
+        game_topmost_row.addStretch()
+        game_topmost_row.addWidget(self._game_topmost_switch)
+        layout.addLayout(game_topmost_row)
+
         opacity_label = BodyLabel(_tr("SettingsWindow.side_opacity"), panel)
         layout.addWidget(opacity_label)
         self._opacity_slider = Slider(Qt.Orientation.Horizontal, panel)
@@ -2831,6 +2845,7 @@ class SettingsWindow(QWidget):
             "opacity": self._opacity_slider.value() / 100.0,
             "dark_theme": self._theme_switch.isChecked(),
             "vsync": self._vsync_switch.isChecked(),
+            "game_topmost": self._game_topmost_switch.isChecked(),
             "live2d_quality": self._live2d_quality,
             "live2d_scale": self._live2d_scale,
             "models": [dict(item) for item in self._configured_models],
@@ -2840,6 +2855,7 @@ class SettingsWindow(QWidget):
             self._cfg.set("opacity", settings["opacity"])
             self._cfg.set("dark_theme", settings["dark_theme"])
             self._cfg.set("vsync", settings["vsync"])
+            self._cfg.set("game_topmost", settings["game_topmost"])
             self._cfg.set("live2d_quality", settings["live2d_quality"])
             self._cfg.set("live2d_scale", settings["live2d_scale"])
             self._cfg.save()

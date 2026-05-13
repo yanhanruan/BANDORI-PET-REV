@@ -89,14 +89,43 @@ def normalize_click_motion_actions(actions, valid_motions=None, valid_expression
     return normalized
 
 
-def click_motion_region_for_point(x: float, y: float, width: int, height: int, area_name: str = "") -> str:
+def click_motion_region_for_point(
+    x: float,
+    y: float,
+    width: int,
+    height: int,
+    area_name: str = "",
+    area_bounds=None,
+) -> str:
     width = max(1, int(width or 1))
     height = max(1, int(height or 1))
-    x_ratio = max(0.0, min(1.0, float(x) / width))
-    y_ratio = max(0.0, min(1.0, float(y) / height))
     area = str(area_name or "").strip().lower()
 
-    if area in {"head", "face"} or (not area and y_ratio < 0.38):
+    if area in {"head", "face"}:
+        return "head"
+
+    if area_bounds:
+        try:
+            min_x, max_x, min_y, max_y = (float(v) for v in area_bounds)
+            bounds_w = max_x - min_x
+            bounds_h = max_y - min_y
+            if bounds_w > 1 and bounds_h > 1:
+                x_ratio = (float(x) - min_x) / bounds_w
+                y_ratio = (float(y) - min_y) / bounds_h
+            else:
+                x_ratio = float(x) / width
+                y_ratio = float(y) / height
+        except (TypeError, ValueError):
+            x_ratio = float(x) / width
+            y_ratio = float(y) / height
+    else:
+        x_ratio = float(x) / width
+        y_ratio = float(y) / height
+
+    x_ratio = max(0.0, min(1.0, x_ratio))
+    y_ratio = max(0.0, min(1.0, y_ratio))
+
+    if area in {"", "body", "hit"} and y_ratio < 0.38:
         return "head"
 
     vertical = "upper_body" if y_ratio < 0.64 else "lower_body"

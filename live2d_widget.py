@@ -63,6 +63,9 @@ class Live2DWidget(QOpenGLWidget):
             (-6, 0), (6, 0), (0, -6), (0, 6),
         )
         self._hit_alpha_cache = {}
+        self._visible_bounds_cache = None
+        self._visible_bounds_cache_at = -1000
+        self._visible_bounds_cache_ttl_ms = 500
         self._hit_alpha_cache_ttl_ms = 100
         self._hit_test_interval_ms = round(1000 / 30)
         self._last_hit_test_ms = -1000
@@ -449,7 +452,22 @@ class Live2DWidget(QOpenGLWidget):
     def hit_area_name_at(self, x: float, y: float) -> str:
         if not self._model:
             return ""
-        return self._sdk_hit_area_name_at(x, y) or self._custom_hit_area_name_at(x, y)
+        return self._custom_hit_area_name_at(x, y) or self._sdk_hit_area_name_at(x, y)
+
+    def hit_area_bounds(self, area_name: str):
+        area_name = str(area_name or "").strip().lower()
+        if not area_name:
+            return None
+        try:
+            return self._custom_hit_areas.bounds_for(area_name)
+        except Exception:
+            return None
+
+    def hit_area_union_bounds(self):
+        try:
+            return self._custom_hit_areas.union_bounds()
+        except Exception:
+            return None
 
     def _is_model_hit_at(self, x: float, y: float) -> bool:
         if not self._model:
@@ -522,9 +540,76 @@ class Live2DWidget(QOpenGLWidget):
 
     def _clear_hit_framebuffer_cache(self):
         self._hit_alpha_cache.clear()
+        self._visible_bounds_cache = None
+        self._visible_bounds_cache_at = -1000
         self._last_hit_test_ms = -1000
         self._last_hit_state = False
         self._clear_pending_hit_pbos()
+
+    def visible_model_bounds(self):
+        if not self._initialized_gl or not self._model:
+            return None
+        now = self._hit_clock.elapsed()
+        if (
+            self._visible_bounds_cache is not None
+            and now - self._visible_bounds_cache_at <= self._visible_bounds_cache_ttl_ms
+        ):
+            return self._visible_bounds_cache
+        bounds = self._read_visible_model_bounds()
+        self._visible_bounds_cache = bounds
+        self._visible_bounds_cache_at = now
+        return bounds
+
+    def _read_visible_model_bounds(self):
+        width = int(self._cache_w * self._system_scale)
+        height = int(self._cache_h * self._system_scale)
+        if width <= 0 or height <= 0:
+            return None
+        try:
+            self._safe_make_current()
+            self._process_hit_pbo_results()
+            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+            data = gl.glReadPixels(0, 0, width, height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE)
+        except Exception:
+            return None
+
+        if not data:
+            return None
+
+        raw = bytes(data)
+        min_x = width
+        max_x = -1
+        min_y = height
+        max_y = -1
+        stride = width * 4
+        threshold = self._hit_alpha_threshold
+        step = 1 if width * height <= 600000 else 2
+        for y_gl in range(0, height, step):
+            row_offset = y_gl * stride
+            hit_in_row = False
+            for x in range(0, width, step):
+                if raw[row_offset + x * 4 + 3] > threshold:
+                    hit_in_row = True
+                    if x < min_x:
+                        min_x = x
+                    if x > max_x:
+                        max_x = x
+            if hit_in_row:
+                qt_y = height - 1 - y_gl
+                if qt_y < min_y:
+                    min_y = qt_y
+                if qt_y > max_y:
+                    max_y = qt_y
+
+        if max_x < min_x or max_y < min_y:
+            return None
+        scale = self._system_scale or 1.0
+        return (
+            min_x / scale,
+            (max_x + step) / scale,
+            min_y / scale,
+            (max_y + step) / scale,
+        )
 
     def _init_hit_pbos(self):
         if self._hit_pbo_supported is not None:

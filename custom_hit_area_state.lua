@@ -92,5 +92,34 @@ return function()
         return false
     end
 
+    function state:bounds_for(name)
+        name = tostring(name or "")
+        for i = 1, #self.projected_areas do
+            local area = self.projected_areas[i]
+            if area[1] == name then
+                return area[2], area[3], area[4], area[5]
+            end
+        end
+        return nil
+    end
+
+    function state:union_bounds()
+        if #self.projected_areas == 0 then
+            return nil
+        end
+        local min_x = self.projected_areas[1][2]
+        local max_x = self.projected_areas[1][3]
+        local min_y = self.projected_areas[1][4]
+        local max_y = self.projected_areas[1][5]
+        for i = 2, #self.projected_areas do
+            local area = self.projected_areas[i]
+            min_x = math.min(min_x, area[2])
+            max_x = math.max(max_x, area[3])
+            min_y = math.min(min_y, area[4])
+            max_y = math.max(max_y, area[5])
+        end
+        return min_x, max_x, min_y, max_y
+    end
+
     return state
 end
