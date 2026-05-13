@@ -233,6 +233,8 @@ def main():
         cfg.set("vsync", pet_window_ref["vsync"])
         cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
         cfg.set("live2d_scale", pet_window_ref["live2d_scale"])
+        if "models" in data:
+            cfg.set("models", data["models"])
         cfg.save()
 
     def launch_pet():

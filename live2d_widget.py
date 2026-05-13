@@ -40,8 +40,11 @@ class Live2DWidget(QOpenGLWidget):
         self._system_scale = 1.0
         
         self._dragging = False
+        self._drag_moved = False
         self._drag_start_x = 0
         self._drag_start_y = 0
+        self._drag_origin_x = 0
+        self._drag_origin_y = 0
         self._window_drag_callback = None
         self._click_callback = None
         self._right_click_callback = None
@@ -215,7 +218,10 @@ class Live2DWidget(QOpenGLWidget):
                     continue
                 x0, x1 = float(x_range[0]), float(x_range[1])
                 y0, y1 = float(y_range[0]), float(y_range[1])
-                prepared.append((min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)))
+                area_name = name[:-2].strip().lower()
+                prepared.append((area_name, min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)))
+            priority = {"head": 0, "face": 0, "body": 10}
+            prepared.sort(key=lambda item: (priority.get(item[0], 5), item[0]))
             return tuple(prepared)
         except Exception:
             return ()
@@ -375,9 +381,12 @@ class Live2DWidget(QOpenGLWidget):
         y = event.scenePosition().y()
         if self._is_model_hit_at(x, y):
             self._dragging = True
+            self._drag_moved = False
             gpos = event.globalPosition()
             self._drag_start_x = gpos.x()
             self._drag_start_y = gpos.y()
+            self._drag_origin_x = gpos.x()
+            self._drag_origin_y = gpos.y()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.RightButton:
@@ -388,18 +397,29 @@ class Live2DWidget(QOpenGLWidget):
                 self._right_click_callback(int(gpos.x()), int(gpos.y()))
             return
         if self._dragging:
+            should_click = (
+                event.button() == Qt.MouseButton.LeftButton
+                and not self._drag_moved
+                and self._click_callback
+                and self._is_model_hit_at(event.scenePosition().x(), event.scenePosition().y())
+            )
             self._dragging = False
-        elif self._click_callback and self._is_model_hit_at(
-            event.scenePosition().x(),
-            event.scenePosition().y(),
-        ):
-            self._click_callback()
+            if should_click:
+                x = event.scenePosition().x()
+                y = event.scenePosition().y()
+                self._click_callback(x, y, self.hit_area_name_at(x, y))
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_locked:
             return
         if self._dragging and self._window_drag_callback:
             gpos = event.globalPosition()
+            if not self._drag_moved:
+                total_dx = gpos.x() - self._drag_origin_x
+                total_dy = gpos.y() - self._drag_origin_y
+                if total_dx * total_dx + total_dy * total_dy < 16:
+                    return
+                self._drag_moved = True
             dx = int(gpos.x() - self._drag_start_x)
             dy = int(gpos.y() - self._drag_start_y)
             if dx != 0 or dy != 0:
@@ -425,6 +445,11 @@ class Live2DWidget(QOpenGLWidget):
         if not self.rect().contains(local):
             return False
         return self._hit_state_at(local.x(), local.y())
+
+    def hit_area_name_at(self, x: float, y: float) -> str:
+        if not self._model:
+            return ""
+        return self._sdk_hit_area_name_at(x, y) or self._custom_hit_area_name_at(x, y)
 
     def _is_model_hit_at(self, x: float, y: float) -> bool:
         if not self._model:
@@ -475,16 +500,25 @@ class Live2DWidget(QOpenGLWidget):
             return False
 
     def _is_in_sdk_hit_area(self, x: float, y: float) -> bool:
+        return bool(self._sdk_hit_area_name_at(x, y))
+
+    def _sdk_hit_area_name_at(self, x: float, y: float) -> str:
         model = self._model
         try:
             if not self._has_sdk_hit_areas():
-                return False
-            return model.HitTest("", x, y) is not None
+                return ""
+            return str(model.HitTest("", x, y) or "").strip().lower()
         except Exception:
-            return False
+            return ""
 
     def _is_in_custom_hit_area(self, x: float, y: float) -> bool:
         return self._custom_hit_areas.hit_test(x, y)
+
+    def _custom_hit_area_name_at(self, x: float, y: float) -> str:
+        try:
+            return self._custom_hit_areas.hit_test_name(x, y).strip().lower()
+        except Exception:
+            return ""
 
     def _clear_hit_framebuffer_cache(self):
         self._hit_alpha_cache.clear()
