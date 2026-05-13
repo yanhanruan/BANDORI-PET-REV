@@ -1,10 +1,10 @@
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QRect, QRectF, QVariantAnimation, QParallelAnimationGroup
-from PySide6.QtGui import QFont, QColor, QPalette, QIcon, QKeyEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QFont, QColor, QPalette, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QImage
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextEdit, QScrollArea, QSizePolicy, QToolButton, QMenu,
     QApplication, QGraphicsOpacityEffect, QWidgetAction,
-    QGraphicsColorizeEffect, QFrame,
+    QGraphicsColorizeEffect, QFrame, QFileDialog, QMessageBox,
 )
 
 from i18n_manager import tr as _tr
@@ -28,9 +28,11 @@ from app_theme import (
 import ctypes
 import ctypes.wintypes
 import os
+import shutil
 from datetime import datetime
 import json
 import re
+from pathlib import Path
 
 from llm_manager import (
     build_system_prompt, LLMStreamWorker, NonStreamWorker,
@@ -48,6 +50,9 @@ _ASSIST_BUBBLE_LIGHT = "#ffffff"
 _ASSIST_BUBBLE_DARK = "#1b1f29"
 _TEAMS_ACCENT = "#6264a7"
 _TELEGRAM_ACCENT = BANDORI_PRIMARY
+_AVATAR_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_AVATAR_PIXMAP_CACHE = {}
+_AVATAR_PIXMAP_CACHE_LIMIT = 96
 
 DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWA_BORDER_COLOR = 34
@@ -66,6 +71,123 @@ if os.name == "nt":
     _dwm_set_window_attribute.restype = ctypes.c_long
 else:
     _dwm_set_window_attribute = None
+
+
+def _avatar_cache_key(path: str, data: bytes, size: int, focus: str):
+    if path and os.path.exists(path):
+        try:
+            stat = os.stat(path)
+            return "path", path, stat.st_mtime_ns, stat.st_size, size, focus
+        except OSError:
+            return "path", path, size, focus
+    if data:
+        sample = data[:2048] + data[-2048:]
+        return "data", len(data), hash(sample), size, focus
+    return "empty", size, focus
+
+
+def _opaque_bounds(source: QPixmap) -> tuple[int, int, int, int]:
+    image = source.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+    width = image.width()
+    height = image.height()
+    step = max(1, min(width, height) // 180)
+    left = width
+    right = -1
+    top = height
+    bottom = -1
+
+    for y in range(0, height, step):
+        for x in range(0, width, step):
+            if image.pixelColor(x, y).alpha() <= 12:
+                continue
+            left = min(left, x)
+            right = max(right, x)
+            top = min(top, y)
+            bottom = max(bottom, y)
+
+    if right < left or bottom < top:
+        return 0, 0, width, height
+    return (
+        max(0, left - step),
+        max(0, top - step),
+        min(width, right + step + 1),
+        min(height, bottom + step + 1),
+    )
+
+
+def _avatar_crop(source: QPixmap, focus: str) -> QPixmap:
+    width = source.width()
+    height = source.height()
+    if width <= 0 or height <= 0:
+        return source
+
+    if focus != "head":
+        side = min(width, height)
+        return source.copy((width - side) // 2, (height - side) // 2, side, side)
+
+    left, top, right, bottom = _opaque_bounds(source)
+    content_w = max(1, right - left)
+    content_h = max(1, bottom - top)
+    upper_bottom = top + int(content_h * 0.42)
+    image = source.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+    step = max(1, min(width, height) // 180)
+    x_sum = 0
+    count = 0
+
+    for y in range(top, min(bottom, upper_bottom), step):
+        for x in range(left, right, step):
+            if image.pixelColor(x, y).alpha() > 12:
+                x_sum += x
+                count += 1
+
+    center_x = (x_sum / count) if count else left + content_w * 0.5
+    center_y = top + content_h * 0.23
+    side = max(content_h * 0.30, min(content_w, content_h) * 0.45)
+    side = min(side, content_h * 0.38, width, height)
+    side = max(1, int(side))
+
+    x = int(round(center_x - side / 2))
+    y = int(round(center_y - side / 2))
+    x = max(0, min(width - side, x))
+    y = max(0, min(height - side, y))
+    return source.copy(x, y, side, side)
+
+
+def _rounded_avatar_pixmap(path: str = "", data: bytes = b"", size: int = 28, focus: str = "center") -> QPixmap:
+    cache_key = _avatar_cache_key(path, data, size, focus)
+    cached = _AVATAR_PIXMAP_CACHE.get(cache_key)
+    if cached is not None:
+        return QPixmap(cached)
+
+    source = QPixmap()
+    if data:
+        source.loadFromData(data)
+    elif path and os.path.exists(path):
+        source.load(path)
+    if source.isNull():
+        return QPixmap()
+
+    crop = _avatar_crop(source, focus)
+    scaled = crop.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+    rounded = QPixmap(size, size)
+    rounded.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(rounded)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path_shape = QPainterPath()
+    path_shape.addEllipse(QRectF(0, 0, size, size))
+    painter.setClipPath(path_shape)
+    painter.drawPixmap(0, 0, scaled)
+    painter.end()
+    _AVATAR_PIXMAP_CACHE[cache_key] = QPixmap(rounded)
+    if len(_AVATAR_PIXMAP_CACHE) > _AVATAR_PIXMAP_CACHE_LIMIT:
+        _AVATAR_PIXMAP_CACHE.pop(next(iter(_AVATAR_PIXMAP_CACHE)))
+    return rounded
 
 
 class FluentContextTextEdit(QTextEdit):
@@ -356,7 +478,20 @@ class PlanDivider(QWidget):
 
 
 class MessageBubble(QWidget):
-    def __init__(self, text: str, role: str, author: str = "", created_at: str = "", parent=None, avatar_color: str = "", reasoning: str = "", show_reasoning: bool = True):
+    def __init__(
+        self,
+        text: str,
+        role: str,
+        author: str = "",
+        created_at: str = "",
+        parent=None,
+        avatar_color: str = "",
+        avatar_path: str = "",
+        avatar_data: bytes = b"",
+        avatar_focus: str = "center",
+        reasoning: str = "",
+        show_reasoning: bool = True,
+    ):
         super().__init__(parent)
         self._text = text
         self._role = role
@@ -365,6 +500,9 @@ class MessageBubble(QWidget):
         self._author = author or (_tr("ChatWindow.you") if role == "user" else _tr("ChatWindow.you"))
         self._created_at = created_at
         self._avatar_color = avatar_color
+        self._avatar_path = avatar_path
+        self._avatar_data = avatar_data
+        self._avatar_focus = avatar_focus
         self._streaming = False
         self._dot_step = 0
         self._typing_timer = QTimer(self)
@@ -512,6 +650,18 @@ class MessageBubble(QWidget):
         reasoning_title = "#aeb8d7" if dark else "#5667a7"
         avatar_bg = self._avatar_color if user and self._avatar_color else _TELEGRAM_ACCENT if user else _TEAMS_ACCENT
         avatar_text = "#ffffff"
+        avatar_pixmap = _rounded_avatar_pixmap(
+            self._avatar_path,
+            self._avatar_data,
+            28,
+            self._avatar_focus,
+        )
+        if avatar_pixmap.isNull():
+            self._avatar.setPixmap(QPixmap())
+            self._avatar.setText(self._initials())
+        else:
+            self._avatar.setText("")
+            self._avatar.setPixmap(avatar_pixmap)
         self._label.setStyleSheet(f"color: {text}; background: transparent;")
         self._meta.setAlignment(Qt.AlignmentFlag.AlignRight if user else Qt.AlignmentFlag.AlignLeft)
         self._meta.setStyleSheet(f"color: {meta}; background: transparent; padding: 0 2px;")
@@ -647,6 +797,8 @@ class ChatWindow(QWidget):
         self._display_name = "群聊" if self._is_group_chat else model_manager.get_display_name(character)
         self._user_name = self._cfg.get("user_name", "").strip() if self._cfg else ""
         self._user_avatar_color = self._cfg.get("user_avatar_color", _TELEGRAM_ACCENT) if self._cfg else _TELEGRAM_ACCENT
+        avatar_paths = self._cfg.get("chat_avatar_paths", {}) if self._cfg else {}
+        self._chat_avatar_paths = avatar_paths if isinstance(avatar_paths, dict) else {}
         self._show_reasoning = bool(self._cfg.get("llm_show_reasoning", True)) if self._cfg else True
 
         from database_manager import DatabaseManager
@@ -813,7 +965,7 @@ class ChatWindow(QWidget):
         avatar.setFixedSize(34, 34)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         avatar.setCursor(Qt.CursorShape.PointingHandCursor)
-        avatar.setToolTip(_tr("ChatWindow.history_tooltip"))
+        avatar.setToolTip(_tr("ChatWindow.avatar_tooltip"))
         avatar.mouseReleaseEvent = self._on_title_avatar_released
         layout.addWidget(avatar)
 
@@ -843,6 +995,7 @@ class ChatWindow(QWidget):
         self._new_btn = new_btn
         self._close_btn = close_btn
         self._title_avatar = avatar
+        self._update_title_avatar()
 
         self._drag_start = None
 
@@ -864,6 +1017,106 @@ class ChatWindow(QWidget):
         bar.mouseReleaseEvent = mouse_release
 
         return bar
+
+    def _title_avatar_character(self) -> str:
+        return "" if self._is_group_chat else self._character
+
+    def _avatar_info_for_character(self, character: str) -> tuple[str, bytes, str]:
+        if not character:
+            return "", b"", "center"
+        custom_path = str(self._chat_avatar_paths.get(character, "")).strip()
+        if custom_path and os.path.exists(custom_path):
+            return custom_path, b"", "center"
+        path = self._model_manager.get_character_image_path(character)
+        if path:
+            return path, b"", "head"
+        data = self._model_manager.get_character_image_data(character)
+        return "", data, "head" if data else "center"
+
+    def _update_title_avatar(self):
+        if not hasattr(self, "_title_avatar"):
+            return
+        character = self._title_avatar_character()
+        path, data, focus = self._avatar_info_for_character(character)
+        pixmap = _rounded_avatar_pixmap(path, data, 34, focus)
+        if pixmap.isNull():
+            self._title_avatar.setPixmap(QPixmap())
+            self._title_avatar.setText(self._display_name[:1].upper())
+        else:
+            self._title_avatar.setText("")
+            self._title_avatar.setPixmap(pixmap)
+
+    def _message_character(self, content: str, role: str) -> str:
+        if role != "assistant":
+            return ""
+        if not self._is_group_chat:
+            return self._character
+        first_line = content.splitlines()[0].strip() if content else ""
+        if first_line.startswith("【") and "】" in first_line:
+            name = first_line[1:first_line.index("】")]
+            for character in self._group_characters:
+                if name == self._model_manager.get_display_name(character):
+                    return character
+        for character in self._group_characters:
+            display = self._model_manager.get_display_name(character)
+            if content.startswith(f"【{display}】"):
+                return character
+        return ""
+
+    def _avatar_storage_dir(self) -> Path:
+        return Path(app_base_dir()) / ".runtime" / "chat_avatars"
+
+    def _safe_avatar_name(self, character: str, ext: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", character).strip("._")
+        return f"{safe or 'avatar'}{ext}"
+
+    def _set_character_avatar(self, character: str):
+        if not character:
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            _tr("ChatWindow.avatar_choose_title"),
+            "",
+            _tr("ChatWindow.avatar_image_filter"),
+        )
+        if not file_path:
+            return
+        source = Path(file_path)
+        ext = source.suffix.lower()
+        if ext not in _AVATAR_EXTENSIONS:
+            ext = ".png"
+        try:
+            target_dir = self._avatar_storage_dir()
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / self._safe_avatar_name(character, ext)
+            shutil.copyfile(source, target)
+            self._chat_avatar_paths[character] = str(target)
+            if self._cfg:
+                self._cfg.set("chat_avatar_paths", dict(self._chat_avatar_paths))
+                self._cfg.save()
+            self._refresh_avatar_views()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                _tr("ChatWindow.avatar_save_failed_title"),
+                _tr("ChatWindow.avatar_save_failed_content", error=str(exc)),
+            )
+
+    def _reset_character_avatar(self, character: str):
+        if not character:
+            return
+        if character in self._chat_avatar_paths:
+            self._chat_avatar_paths.pop(character, None)
+            if self._cfg:
+                self._cfg.set("chat_avatar_paths", dict(self._chat_avatar_paths))
+                self._cfg.save()
+            self._refresh_avatar_views()
+
+    def _refresh_avatar_views(self):
+        self._update_title_avatar()
+        if self._conv_id is not None:
+            self._clear_message_widgets()
+            self._load_messages()
 
     def _build_input_area(self):
         area = RoundedPanel()
@@ -992,6 +1245,7 @@ class ChatWindow(QWidget):
         self._new_btn.apply_theme()
         self._close_btn.apply_theme()
         self._send_btn.apply_theme()
+        self._update_title_avatar()
 
         self._scroll.setStyleSheet(f"""
             QScrollArea {{
@@ -1103,6 +1357,24 @@ class ChatWindow(QWidget):
                 color: {muted};
             }}
         """)
+
+        if self._is_group_chat:
+            change_menu = menu.addMenu(_tr("ChatWindow.avatar_change_menu"))
+            reset_menu = menu.addMenu(_tr("ChatWindow.avatar_reset_menu"))
+            for character in self._group_characters:
+                display = self._model_manager.get_display_name(character)
+                change_action = change_menu.addAction(display)
+                change_action.triggered.connect(lambda _checked=False, c=character: self._set_character_avatar(c))
+                reset_action = reset_menu.addAction(display)
+                reset_action.setEnabled(bool(self._chat_avatar_paths.get(character)))
+                reset_action.triggered.connect(lambda _checked=False, c=character: self._reset_character_avatar(c))
+        else:
+            change_action = menu.addAction(_tr("ChatWindow.avatar_change"))
+            change_action.triggered.connect(lambda: self._set_character_avatar(self._character))
+            reset_action = menu.addAction(_tr("ChatWindow.avatar_reset"))
+            reset_action.setEnabled(bool(self._chat_avatar_paths.get(self._character)))
+            reset_action.triggered.connect(lambda: self._reset_character_avatar(self._character))
+        menu.addSeparator()
 
         title = menu.addAction(_tr("ChatWindow.history_title"))
         title.setEnabled(False)
@@ -1333,12 +1605,22 @@ class ChatWindow(QWidget):
         for m in messages:
             author = self._user_name if m["role"] == "user" and self._user_name else _tr("ChatWindow.you") if m["role"] == "user" else self._message_author(m["content"])
             avatar = self._user_avatar_color if m["role"] == "user" else ""
+            avatar_path = ""
+            avatar_data = b""
+            avatar_focus = "center"
+            if m["role"] == "assistant":
+                avatar_path, avatar_data, avatar_focus = self._avatar_info_for_character(
+                    self._message_character(m["content"], m["role"])
+                )
             bubble = MessageBubble(
                 self._message_content(m["content"], m["role"]),
                 m["role"],
                 author,
                 m.get("created_at", ""),
                 avatar_color=avatar,
+                avatar_path=avatar_path,
+                avatar_data=avatar_data,
+                avatar_focus=avatar_focus,
                 reasoning=m.get("reasoning_content", ""),
                 show_reasoning=self._show_reasoning,
             )
@@ -1412,10 +1694,14 @@ class ChatWindow(QWidget):
 
         if not api_url or not api_key or not model_id:
             self._composer_hint.setText(_tr("ChatWindow.not_configured"))
+            avatar_path, avatar_data, avatar_focus = self._avatar_info_for_character(self._character)
             bubble = MessageBubble(
                 _tr("ChatWindow.no_llm_config"),
                 "assistant",
                 self._display_name,
+                avatar_path=avatar_path,
+                avatar_data=avatar_data,
+                avatar_focus=avatar_focus,
             )
             self._msg_layout.insertWidget(self._msg_layout.count() - 1, bubble)
             self._scroll_to_bottom()
@@ -1542,7 +1828,16 @@ class ChatWindow(QWidget):
         model_id = self._cfg.get("llm_model_id", "")
         self._active_response_character = character
         self._pending_action_character = character
-        self._current_bubble = MessageBubble("", "assistant", self._message_author(self._assistant_content(character, "")), show_reasoning=self._show_reasoning)
+        avatar_path, avatar_data, avatar_focus = self._avatar_info_for_character(character)
+        self._current_bubble = MessageBubble(
+            "",
+            "assistant",
+            self._message_author(self._assistant_content(character, "")),
+            avatar_path=avatar_path,
+            avatar_data=avatar_data,
+            avatar_focus=avatar_focus,
+            show_reasoning=self._show_reasoning,
+        )
         self._current_bubble.set_streaming(True)
         self._msg_layout.insertWidget(self._msg_layout.count() - 1, self._current_bubble)
         self._scroll_to_bottom()
