@@ -4,6 +4,7 @@ __pycache__/
 models/
 pixels/
 BUILD/
+build/
 BandoriPet.egg-info/
 third_party/
 venv/
