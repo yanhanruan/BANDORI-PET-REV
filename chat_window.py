@@ -711,6 +711,7 @@ class MessageBubble(QWidget):
         self._label.setWordWrap(True)
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         font = QFont()
         font.setPointSize(10)
         self._label.setFont(font)
@@ -761,8 +762,9 @@ class MessageBubble(QWidget):
         stack = QVBoxLayout()
         stack.setContentsMargins(0, 0, 0, 0)
         stack.setSpacing(2)
+        align = Qt.AlignmentFlag.AlignRight if self._role == "user" else Qt.AlignmentFlag.AlignLeft
         stack.addWidget(self._meta)
-        stack.addWidget(self._container)
+        stack.addWidget(self._container, 0, align)
 
         inner = QHBoxLayout()
         inner.setContentsMargins(0, 0, 0, 0)
@@ -770,21 +772,76 @@ class MessageBubble(QWidget):
 
         if self._role == "user":
             inner.addStretch()
-            inner.addLayout(stack, 4)
+            inner.addLayout(stack)
             inner.addWidget(self._avatar, 0, Qt.AlignmentFlag.AlignTop)
             inner.setContentsMargins(48, 0, 0, 0)
         else:
             inner.addWidget(self._avatar, 0, Qt.AlignmentFlag.AlignTop)
-            inner.addLayout(stack, 4)
+            inner.addLayout(stack)
             inner.addStretch()
             inner.setContentsMargins(0, 0, 48, 0)
 
         layout.addLayout(inner)
+        QTimer.singleShot(0, self._update_bubble_width)
 
     def _make_container(self, user: bool) -> QWidget:
         w = RoundedPanel()
-        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         return w
+
+    def _available_bubble_width(self) -> int:
+        width = self.width()
+        if width <= 0 and self.parentWidget():
+            width = self.parentWidget().width()
+        if width <= 0:
+            return 320
+
+        # Message layout margins + avatar row reserve: outer margins (24),
+        # side indent (48), avatar (28), and the avatar/bubble spacing (8).
+        return max(80, width - 108)
+
+    @staticmethod
+    def _widest_plain_line(label: QLabel) -> int:
+        text = label.text().replace("\r\n", "\n").replace("\r", "\n")
+        lines = text.split("\n") if text else [""]
+        fm = label.fontMetrics()
+        return max(fm.horizontalAdvance(line) for line in lines)
+
+    @staticmethod
+    def _has_plain_newline(label: QLabel) -> bool:
+        return "\n" in label.text().replace("\r\n", "\n").replace("\r", "\n")
+
+    def _natural_bubble_width(self) -> int:
+        content_width = self._widest_plain_line(self._label)
+        if self._stream_label.isVisible() and self._stream_label.text():
+            content_width = max(content_width, self._widest_plain_line(self._stream_label))
+        if self._reasoning_panel.isVisible():
+            reasoning_width = max(
+                self._widest_plain_line(self._reasoning_title),
+                self._widest_plain_line(self._reasoning_label),
+            )
+            content_width = max(content_width, reasoning_width + 28)
+        return max(36, content_width + 24)
+
+    def _update_bubble_width(self):
+        natural_width = self._natural_bubble_width()
+        available_width = self._available_bubble_width()
+        target_width = min(natural_width, available_width)
+        should_wrap = natural_width > available_width or self._has_plain_newline(self._label)
+        self._label.setWordWrap(should_wrap)
+        self._container.setFixedWidth(target_width)
+
+        text_width = max(1, target_width - 24)
+        self._label.setFixedWidth(text_width)
+        self._stream_label.setFixedWidth(text_width)
+        reasoning_text_width = max(1, target_width - 52)
+        self._reasoning_title.setFixedWidth(reasoning_text_width)
+        self._reasoning_label.setFixedWidth(reasoning_text_width)
+        self._container.updateGeometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_bubble_width()
 
     def _initials(self) -> str:
         text = self._author.strip()
@@ -811,6 +868,7 @@ class MessageBubble(QWidget):
     def _tick_typing(self):
         self._dot_step = (self._dot_step + 1) % 4
         self._stream_label.setText(_tr("ChatWindow.streaming") + "." * self._dot_step)
+        self._update_bubble_width()
 
     def apply_theme(self):
         dark = isDarkTheme()
@@ -864,6 +922,7 @@ class MessageBubble(QWidget):
         if self._streaming and old_height > 0:
             self.setMaximumHeight(old_height)
         self._label.setText(text)
+        self._update_bubble_width()
         if self._streaming:
             self._animate_stream_text()
             QTimer.singleShot(0, lambda h=old_height: self._animate_stream_height(h))
@@ -876,6 +935,7 @@ class MessageBubble(QWidget):
             self.setMaximumHeight(old_height)
         self._reasoning_label.setText(self._reasoning)
         self._reasoning_panel.setVisible(self._should_show_reasoning())
+        self._update_bubble_width()
         if self._streaming:
             if self._reasoning_panel.isVisible() and not was_visible:
                 self._animate_stream_text()
@@ -929,6 +989,7 @@ class MessageBubble(QWidget):
             self._typing_timer.stop()
             self._stream_label.hide()
             self.setMaximumHeight(16777215)
+            self._update_bubble_width()
 
 
 class ChatWindow(QWidget):
