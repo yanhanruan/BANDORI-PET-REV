@@ -365,10 +365,10 @@ class IconButton(QToolButton):
 
 
 class ConversationHistoryRow(QWidget):
-    selected = Signal(int)
-    delete_requested = Signal(int)
+    selected = Signal(object)
+    delete_requested = Signal(object)
 
-    def __init__(self, conv_id: int, title: str, current: bool, parent=None):
+    def __init__(self, conv_id, title: str, current: bool, parent=None):
         super().__init__(parent)
         self._conv_id = conv_id
         self._current = current
@@ -1882,12 +1882,17 @@ class ChatWindow(QWidget):
             title.setEnabled(False)
             if conversations:
                 for conv in conversations:
-                    action = menu.addAction(self._group_preview(conv))
-                    action.setCheckable(True)
-                    action.setChecked(conv["conversation_id"] == self._group_conv_id)
-                    action.triggered.connect(
-                        lambda _checked=False, conv_id=conv["conversation_id"]: self._defer_group_conversation_switch(conv_id)
+                    row = ConversationHistoryRow(
+                        conv["conversation_id"],
+                        self._group_preview(conv),
+                        conv["conversation_id"] == self._group_conv_id,
+                        menu,
                     )
+                    row.selected.connect(lambda conv_id: self._select_group_history_row(menu, conv_id))
+                    row.delete_requested.connect(lambda conv_id: self._delete_group_history_row(menu, conv_id))
+                    action = QWidgetAction(menu)
+                    action.setDefaultWidget(row)
+                    menu.addAction(action)
             else:
                 empty = menu.addAction(_tr("ChatWindow.no_convs"))
                 empty.setEnabled(False)
@@ -2007,8 +2012,11 @@ class ChatWindow(QWidget):
     def _select_history_row(self, menu: QMenu, conv_id: int):
         QTimer.singleShot(0, lambda menu=menu, conv_id=conv_id: self._close_menu_and_switch_conversation(menu, conv_id))
 
-    def _defer_group_conversation_switch(self, conversation_id: str):
-        QTimer.singleShot(0, lambda conversation_id=conversation_id: self._switch_group_conversation(conversation_id))
+    def _select_group_history_row(self, menu: QMenu, conversation_id: str):
+        QTimer.singleShot(0, lambda menu=menu, conversation_id=conversation_id: self._close_menu_and_switch_group_conversation(menu, conversation_id))
+
+    def _delete_group_history_row(self, menu: QMenu, conversation_id: str):
+        QTimer.singleShot(0, lambda menu=menu, conversation_id=conversation_id: self._close_menu_and_delete_group_conversation(menu, conversation_id))
 
     def _delete_history_row(self, menu: QMenu, conv_id: int):
         QTimer.singleShot(0, lambda menu=menu, conv_id=conv_id: self._close_menu_and_delete_conversation(menu, conv_id))
@@ -2020,6 +2028,14 @@ class ChatWindow(QWidget):
     def _close_menu_and_delete_conversation(self, menu: QMenu, conv_id: int):
         menu.close()
         self._delete_conversation(conv_id)
+
+    def _close_menu_and_switch_group_conversation(self, menu: QMenu, conversation_id: str):
+        menu.close()
+        self._switch_group_conversation(conversation_id)
+
+    def _close_menu_and_delete_group_conversation(self, menu: QMenu, conversation_id: str):
+        menu.close()
+        self._delete_group_conversation(conversation_id)
 
     def _switch_group_chat(self, characters: list[str]):
         if (self._worker and self._worker.isRunning()) or (self._group_plan_worker and self._group_plan_worker.isRunning()):
@@ -2135,6 +2151,30 @@ class ChatWindow(QWidget):
             self._load_messages()
         else:
             self._conv_id = None
+        self._input.setFocus()
+
+    def _delete_group_conversation(self, conversation_id: str):
+        if (self._worker and self._worker.isRunning()) or (self._group_plan_worker and self._group_plan_worker.isRunning()):
+            return
+        was_current = conversation_id == self._group_conv_id
+        self._db.delete_group_conversation(self._conversation_key, conversation_id)
+        self._refresh_group_list()
+
+        if not was_current:
+            return
+
+        conversations = self._db.get_group_conversations(self._conversation_key)
+        self._stream_flush_timer.stop()
+        self._stream_buffer = ""
+        self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
+        self._current_bubble = None
+        self._group_queue = []
+        self._group_spoken = []
+        self._clear_message_widgets()
+        self._group_conv_id = conversations[0]["conversation_id"] if conversations else ""
+        if self._group_conv_id:
+            self._load_messages()
         self._input.setFocus()
 
     def _has_llm_config(self) -> bool:

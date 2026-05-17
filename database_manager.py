@@ -353,6 +353,14 @@ class DatabaseManager:
                 result.append(message)
         return result
 
+    def delete_group_conversation(self, group_key: str, conversation_id: str):
+        conversation_id = conversation_id or "default"
+        self._conn.execute(
+            "DELETE FROM group_messages WHERE group_key=? AND (conversation_id=? OR CAST(conversation_id AS TEXT)=?)",
+            (group_key, conversation_id, conversation_id),
+        )
+        self._conn.commit()
+
     def get_group_conversations(self, group_key: str) -> list[dict]:
         rows = self._conn.execute(
             "SELECT conversation_id, id, role, content, created_at FROM group_messages "
