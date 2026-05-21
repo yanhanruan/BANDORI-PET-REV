@@ -3787,7 +3787,7 @@ class ChatWindow(QWidget):
             {"role": "system", "content": planner_prompt},
             {"role": "user", "content": content},
         ]
-        self._group_plan_worker = NonStreamWorker(api_url, api_key, aux_model_id, messages, self._cfg.get("llm_enable_thinking", None))
+        self._group_plan_worker = NonStreamWorker(api_url, api_key, aux_model_id, messages, self._cfg.get("llm_aux_enable_thinking", None))
         self._group_plan_worker.finished.connect(self._on_group_plan_finished)
         self._group_plan_worker.error.connect(self._on_group_plan_error)
         self._group_plan_worker.start()
@@ -4092,6 +4092,7 @@ class ChatWindow(QWidget):
             "llm_api_key",
             "llm_model_id",
             "llm_aux_model_id",
+            "llm_aux_enable_thinking",
         )
         return {key: self._cfg.get(key, None) for key in keys} if self._cfg else {}
 

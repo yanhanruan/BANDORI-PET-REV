@@ -2794,6 +2794,18 @@ class SettingsWindow(QWidget):
         aux_model_row.addWidget(aux_fetch_btn)
         layout.addLayout(aux_model_row)
 
+        aux_thinking_label = BodyLabel(_tr("SettingsWindow.llm_aux_enable_thinking"), page)
+        layout.addWidget(aux_thinking_label)
+        self._llm_aux_enable_thinking = OpaqueDropDownComboBox(page)
+        self._llm_aux_enable_thinking.addItems([
+            _tr("SettingsWindow.llm_enable_thinking_default"),
+            _tr("SettingsWindow.llm_enable_thinking_on"),
+            _tr("SettingsWindow.llm_enable_thinking_off"),
+        ])
+        self._llm_aux_enable_thinking.setFixedHeight(36)
+        self._llm_aux_enable_thinking.setCurrentIndex(0)
+        layout.addWidget(self._llm_aux_enable_thinking)
+
         api_mode_label = BodyLabel(_tr("SettingsWindow.llm_api_mode", default="API 模式"), page)
         layout.addWidget(api_mode_label)
         self._llm_api_mode = OpaqueDropDownComboBox(page)
@@ -5259,6 +5271,7 @@ class SettingsWindow(QWidget):
                 "_llm_api_key",
                 "_llm_model_id",
                 "_llm_aux_model_id",
+                "_llm_aux_enable_thinking",
                 "_llm_api_profile_combo",
                 "_llm_api_profile_name",
                 "_llm_api_mode",
@@ -5494,6 +5507,13 @@ class SettingsWindow(QWidget):
             self._llm_api_key.setText(self._cfg.get("llm_api_key", ""))
             self._llm_model_id.setText(self._cfg.get("llm_model_id", ""))
             self._llm_aux_model_id.setText(self._cfg.get("llm_aux_model_id", ""))
+            aux_thinking_val = self._cfg.get("llm_aux_enable_thinking", None)
+            if aux_thinking_val is True:
+                self._llm_aux_enable_thinking.setCurrentIndex(1)
+            elif aux_thinking_val is False:
+                self._llm_aux_enable_thinking.setCurrentIndex(2)
+            else:
+                self._llm_aux_enable_thinking.setCurrentIndex(0)
             api_mode = self._cfg.get("llm_api_mode", "chat_completions")
             for i in range(self._llm_api_mode.count()):
                 if self._llm_api_mode.itemData(i) == api_mode:
@@ -5564,6 +5584,8 @@ class SettingsWindow(QWidget):
                 "llm_api_key": str(profile.get("llm_api_key", "") or "").strip(),
                 "llm_model_id": str(profile.get("llm_model_id", "") or "").strip(),
                 "llm_aux_model_id": str(profile.get("llm_aux_model_id", "") or "").strip(),
+                "llm_aux_enable_thinking": profile.get("llm_aux_enable_thinking", None)
+                if profile.get("llm_aux_enable_thinking", None) in (True, False, None) else None,
                 "llm_api_mode": api_mode,
                 "llm_web_search_enabled": bool(profile.get("llm_web_search_enabled", False)),
                 "llm_web_search_engine": str(profile.get("llm_web_search_engine", "bing_cn") or "bing_cn"),
@@ -5577,12 +5599,15 @@ class SettingsWindow(QWidget):
     def _current_llm_api_profile(self, name: str) -> dict:
         thinking_idx = self._llm_enable_thinking.currentIndex()
         thinking = True if thinking_idx == 1 else False if thinking_idx == 2 else None
+        aux_thinking_idx = self._llm_aux_enable_thinking.currentIndex()
+        aux_thinking = True if aux_thinking_idx == 1 else False if aux_thinking_idx == 2 else None
         return {
             "name": name.strip(),
             "llm_api_url": self._llm_api_url.text().strip(),
             "llm_api_key": self._llm_api_key.text().strip(),
             "llm_model_id": self._llm_model_id.text().strip(),
             "llm_aux_model_id": self._llm_aux_model_id.text().strip(),
+            "llm_aux_enable_thinking": aux_thinking,
             "llm_api_mode": self._llm_api_mode.itemData(self._llm_api_mode.currentIndex()) or "chat_completions",
             "llm_web_search_enabled": self._llm_web_search_enabled.isChecked(),
             "llm_web_search_engine": self._llm_web_search_engine.itemData(self._llm_web_search_engine.currentIndex()) or "bing_cn",
@@ -5597,6 +5622,7 @@ class SettingsWindow(QWidget):
             "llm_api_key",
             "llm_model_id",
             "llm_aux_model_id",
+            "llm_aux_enable_thinking",
             "llm_api_mode",
             "llm_web_search_enabled",
             "llm_web_search_engine",
@@ -5612,6 +5638,7 @@ class SettingsWindow(QWidget):
             "llm_api_key",
             "llm_model_id",
             "llm_aux_model_id",
+            "llm_aux_enable_thinking",
             "llm_api_mode",
         )
         return all(left.get(key) == right.get(key) for key in keys)
@@ -5684,6 +5711,8 @@ class SettingsWindow(QWidget):
         self._llm_api_key.setText(profile.get("llm_api_key", ""))
         self._llm_model_id.setText(profile.get("llm_model_id", ""))
         self._llm_aux_model_id.setText(profile.get("llm_aux_model_id", ""))
+        aux_thinking = profile.get("llm_aux_enable_thinking", None)
+        self._llm_aux_enable_thinking.setCurrentIndex(1 if aux_thinking is True else 2 if aux_thinking is False else 0)
         api_mode = profile.get("llm_api_mode", "chat_completions")
         for i in range(self._llm_api_mode.count()):
             if self._llm_api_mode.itemData(i) == api_mode:
@@ -5963,6 +5992,13 @@ class SettingsWindow(QWidget):
             self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
             self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
             self._cfg.set("llm_aux_model_id", self._llm_aux_model_id.text().strip())
+            aux_thinking_idx = self._llm_aux_enable_thinking.currentIndex()
+            if aux_thinking_idx == 1:
+                self._cfg.set("llm_aux_enable_thinking", True)
+            elif aux_thinking_idx == 2:
+                self._cfg.set("llm_aux_enable_thinking", False)
+            else:
+                self._cfg.set("llm_aux_enable_thinking", None)
             self._cfg.set("llm_api_mode", self._llm_api_mode.itemData(self._llm_api_mode.currentIndex()) or "chat_completions")
             self._cfg.set("llm_web_search_enabled", self._llm_web_search_enabled.isChecked())
             self._cfg.set("llm_web_search_engine", self._llm_web_search_engine.itemData(self._llm_web_search_engine.currentIndex()) or "bing_cn")
