@@ -6767,6 +6767,17 @@ def _responses_api_url(api_url: str) -> str:
     return url + "/responses"
 
 
+def _chat_completions_api_url(api_url: str) -> str:
+    url = (api_url or "").rstrip("/")
+    if url.endswith("/chat/completions"):
+        return url
+    if url.endswith("/responses"):
+        return url[: -len("/responses")] + "/chat/completions"
+    if url.endswith("/v1"):
+        return url + "/chat/completions"
+    return url
+
+
 class UpdateCheckWorker(QThread):
     finished = Signal(object)
     error = Signal(str)
@@ -6837,38 +6848,23 @@ class TestConnectionWorker(QThread):
 
             ctx = ssl.create_default_context()
 
-            if self._api_mode == "responses":
-                url = _responses_api_url(self._api_url)
-                body = json.dumps({
-                    "model": self._model_id,
-                    "input": [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}],
-                    "max_output_tokens": 16,
-                }).encode("utf-8")
-            else:
-                url = self._api_url
-                body = json.dumps({
-                    "model": self._model_id,
-                    "messages": [{"role": "user", "content": "Hi"}],
-                    "max_tokens": 5,
-                }).encode("utf-8")
-
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self._api_key}",
             }
 
-            req = urllib.request.Request(
-                url, data=body, headers=headers, method="POST"
-            )
-
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if self._api_mode == "responses" and data.get("id"):
-                    self.finished.emit()
-                elif data.get("choices", []):
-                    self.finished.emit()
+            try:
+                if self._api_mode == "responses":
+                    self._test_responses_request(urllib.request, json, headers, ctx)
                 else:
-                    self.error.emit("Unexpected response format")
+                    self._test_chat_completions_request(urllib.request, json, headers, ctx)
+                self.finished.emit()
+            except urllib.error.HTTPError as e:
+                if self._api_mode == "responses" and e.code in (400, 403, 404, 422):
+                    self._test_chat_completions_request(urllib.request, json, headers, ctx)
+                    self.finished.emit()
+                    return
+                raise
         except urllib.error.HTTPError as e:
             try:
                 err_body = json.loads(e.read().decode("utf-8"))
@@ -6880,6 +6876,30 @@ class TestConnectionWorker(QThread):
             self.error.emit(f"Network error: {e.reason}")
         except Exception as e:
             self.error.emit(str(e))
+
+    def _test_responses_request(self, urllib_request, json_module, headers: dict, ctx):
+        url = _responses_api_url(self._api_url)
+        body = json_module.dumps({
+            "model": self._model_id,
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}],
+        }).encode("utf-8")
+        req = urllib_request.Request(url, data=body, headers=headers, method="POST")
+        with urllib_request.urlopen(req, timeout=30, context=ctx) as resp:
+            data = json_module.loads(resp.read().decode("utf-8"))
+            if not data.get("id"):
+                raise ValueError("Unexpected response format")
+
+    def _test_chat_completions_request(self, urllib_request, json_module, headers: dict, ctx):
+        url = _chat_completions_api_url(self._api_url)
+        body = json_module.dumps({
+            "model": self._model_id,
+            "messages": [{"role": "user", "content": "Hi"}],
+        }).encode("utf-8")
+        req = urllib_request.Request(url, data=body, headers=headers, method="POST")
+        with urllib_request.urlopen(req, timeout=30, context=ctx) as resp:
+            data = json_module.loads(resp.read().decode("utf-8"))
+            if not data.get("choices", []):
+                raise ValueError("Unexpected response format")
 
 
 class FetchModelsWorker(QThread):
