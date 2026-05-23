@@ -10,15 +10,11 @@ import time
 if os.name == "nt":
     import ctypes.wintypes
 
-from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent
-from PySide6.QtGui import QColor, QIcon, QCursor, QGuiApplication, QMoveEvent, QResizeEvent
+from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent, QCoreApplication
 from PySide6.QtNetwork import QLocalSocket
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu, QStackedLayout,
-)
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QStackedLayout
 
 from app_theme import apply_app_theme
-from compact_ai_window import CompactAIWindow
 from i18n_manager import tr as _tr, set_language
 from live2d_click_actions import (
     CLICK_MOTION_NONE,
@@ -29,10 +25,7 @@ from live2d_click_actions import (
 )
 from live2d_widget import Live2DWidget, normalize_live2d_quality
 from model_manager import ModelManager
-from pixel_pet_widget import PixelPetWidget, load_pixel_frames, pixel_path_for_character
 from process_utils import app_base_dir, ipc_server_name, process_program_and_args
-from radial_menu import RadialMenu
-from tray_utils import keep_tray_icon_visible, load_tray_icon
 
 if sys.platform == "darwin":
     import macos_patch
@@ -199,6 +192,32 @@ def _clamp_live2d_scale(value) -> int:
     return max(LIVE2D_SCALE_MIN, min(LIVE2D_SCALE_MAX, pct))
 
 
+_PIXEL_PET_WIDGET_CLASS = None
+_PIXEL_FRAME_LOADER = None
+_PIXEL_PATH_RESOLVER = None
+_COMPACT_AI_WINDOW_CLASS = None
+
+
+def _pixel_pet_support():
+    global _PIXEL_PET_WIDGET_CLASS, _PIXEL_FRAME_LOADER, _PIXEL_PATH_RESOLVER
+    if _PIXEL_PET_WIDGET_CLASS is None:
+        from pixel_pet_widget import PixelPetWidget, load_pixel_frames, pixel_path_for_character
+
+        _PIXEL_PET_WIDGET_CLASS = PixelPetWidget
+        _PIXEL_FRAME_LOADER = load_pixel_frames
+        _PIXEL_PATH_RESOLVER = pixel_path_for_character
+    return _PIXEL_PET_WIDGET_CLASS, _PIXEL_FRAME_LOADER, _PIXEL_PATH_RESOLVER
+
+
+def _compact_ai_window_class():
+    global _COMPACT_AI_WINDOW_CLASS
+    if _COMPACT_AI_WINDOW_CLASS is None:
+        from compact_ai_window import CompactAIWindow
+
+        _COMPACT_AI_WINDOW_CLASS = CompactAIWindow
+    return _COMPACT_AI_WINDOW_CLASS
+
+
 class PetWindow(QWidget):
     def __init__(self, live2d_module, model_manager=None,
                  character="", costume="", fps=120, opacity=1.0,
@@ -206,6 +225,8 @@ class PetWindow(QWidget):
         super().__init__()
         icon_path = os.path.join(app_base_dir(), "logo.ico")
         if os.path.exists(icon_path):
+            from PySide6.QtGui import QIcon
+
             self.setWindowIcon(QIcon(icon_path))
         self._live2d = live2d_module
         self._model_manager = model_manager or ModelManager()
@@ -231,7 +252,8 @@ class PetWindow(QWidget):
                 self._cfg.get("live2d_quality", "balanced")
             )
             self._live2d_scale = _clamp_live2d_scale(self._cfg.get("live2d_scale", 100) or 100)
-        self._radial_menu = None
+        self._radial_menu_process = None
+        self._radial_menu_buffer = ""
         self._compact_ai_window = None
         self._compact_ai_bounds_cache = None
         self._compact_ai_drag_bounds = None
@@ -243,10 +265,9 @@ class PetWindow(QWidget):
         self._settings_process = None
         self._entrance_anim = None
         self._pixel_mode = self._configured_pet_mode() == "pixel"
-        self._pixel_frames = load_pixel_frames() if self._pixel_mode else None
+        self._pixel_frames = None
         self._pixel_ready = False
         self._show_pos_set = False
-        self._radial_menu_prewarmed = False
         self._motion_guard_token = 0
         self._expression_guard_token = 0
         self._click_expression_hold_until = 0.0
@@ -291,7 +312,9 @@ class PetWindow(QWidget):
         self._context_idle_timer.start()
         self._apply_game_topmost_state()
         self._connect_ipc_socket()
-        QApplication.instance().installEventFilter(self)
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
         self.setWindowOpacity(self._opacity)
 
@@ -332,7 +355,8 @@ class PetWindow(QWidget):
         self._live2d_widget.model_loaded.connect(self._on_live2d_model_loaded)
         self._stack.addWidget(self._live2d_widget)
 
-        self._pixel_widget = PixelPetWidget(self)
+        pixel_widget_class, _load_pixel_frames, _pixel_path_for_character = _pixel_pet_support()
+        self._pixel_widget = pixel_widget_class(self)
         self._pixel_widget.set_window_drag_callback(self._on_drag)
         self._pixel_widget.set_click_callback(self._on_click)
         self._pixel_widget.set_right_click_callback(self._on_right_click)
@@ -343,6 +367,8 @@ class PetWindow(QWidget):
         if not sys.platform.startswith("linux"):
             return False
         try:
+            from PySide6.QtGui import QGuiApplication
+
             return "xcb" in QGuiApplication.platformName().lower()
         except Exception:
             return False
@@ -475,12 +501,12 @@ class PetWindow(QWidget):
         macos_patch.set_collection_behavior(self, macos_patch.PET_COLLECTION_BEHAVIOR)
 
     def eventFilter(self, obj, event):
-        if self._radial_menu is not None and self._radial_menu.isVisible():
+        if self._is_radial_menu_visible():
             event_type = event.type()
             if event_type == QEvent.Type.ApplicationDeactivate:
-                self._radial_menu.dismiss()
+                self._close_radial_menu_process()
             elif obj is self and event_type == QEvent.Type.WindowDeactivate:
-                self._radial_menu.dismiss()
+                self._close_radial_menu_process()
         return super().eventFilter(obj, event)
 
     def _set_mouse_passthrough(self, enabled: bool):
@@ -564,6 +590,8 @@ class PetWindow(QWidget):
             return
         if self._live2d_widget._dragging or self._pixel_widget._dragging:
             return
+        from PySide6.QtGui import QCursor
+
         global_pos = QCursor.pos()
         if not self.geometry().contains(global_pos):
             self._set_mouse_passthrough(False)
@@ -614,13 +642,13 @@ class PetWindow(QWidget):
                 lambda t=self._motion_guard_token: self._restore_default_motion(t, force_clear=False),
             )
 
-    def moveEvent(self, event: QMoveEvent):
+    def moveEvent(self, event):
         super().moveEvent(event)
         if not self._suppress_compact_ai_sync and not self._is_pet_dragging():
             self._sync_compact_ai_window()
         self._schedule_position_save()
 
-    def resizeEvent(self, event: QResizeEvent):
+    def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_compact_ai_window()
         self._schedule_position_save()
@@ -631,11 +659,12 @@ class PetWindow(QWidget):
         super().hideEvent(event)
 
     def closeEvent(self, event):
+        self._close_radial_menu_process(force=True)
         self._close_chat_process()
         self._close_compact_ai_window()
         self._close_settings_process()
         self._save_config()
-        app = QApplication.instance()
+        app = QCoreApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
         super().closeEvent(event)
@@ -646,6 +675,9 @@ class PetWindow(QWidget):
         self._position_save_timer.start()
 
     def _init_tray(self):
+        from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+        from tray_utils import keep_tray_icon_visible, load_tray_icon
+
         self._tray_icon = QSystemTrayIcon(self)
         self._tray_icon.setIcon(load_tray_icon())
 
@@ -779,7 +811,7 @@ class PetWindow(QWidget):
         if model is None or self._is_pet_dragging():
             return
         self._maybe_trigger_mouse_approach_behavior()
-        if self._radial_menu is not None and self._radial_menu.isVisible():
+        if self._is_radial_menu_visible():
             return
         now = time.monotonic()
         if now - self._last_context_idle_action_at < LIVE2D_AMBIENT_COOLDOWN_SECONDS:
@@ -809,8 +841,10 @@ class PetWindow(QWidget):
     def _maybe_trigger_mouse_approach_behavior(self):
         if not self._live2d_idle_actions_enabled:
             return
-        if self._radial_menu is not None and self._radial_menu.isVisible():
+        if self._is_radial_menu_visible():
             return
+        from PySide6.QtGui import QCursor
+
         cursor = QCursor.pos()
         approach_radius = max(
             LIVE2D_MOUSE_APPROACH_RADIUS,
@@ -1118,7 +1152,9 @@ class PetWindow(QWidget):
             self.resize(*self._live2d_size())
         self._sync_compact_ai_window()
 
-    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
+    def _on_tray_activated(self, reason):
+        from PySide6.QtWidgets import QSystemTrayIcon
+
         if sys.platform == "darwin":
             return
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -1166,8 +1202,8 @@ class PetWindow(QWidget):
     def _on_click(self, x: float | None = None, y: float | None = None, area_name: str = ""):
         self._note_user_interaction()
         self._refresh_topmost_for_interaction(force=True)
-        if self._radial_menu and self._radial_menu.isVisible():
-            self._radial_menu.dismiss()
+        if self._is_radial_menu_visible():
+            self._close_radial_menu_process()
             return
         if self._pixel_mode or x is None or y is None:
             return
@@ -1339,65 +1375,123 @@ class PetWindow(QWidget):
         self._note_user_interaction()
         self._refresh_topmost_for_interaction(force=True)
         self._set_mouse_passthrough(False)
-        radial_menu = self._ensure_radial_menu()
-        if radial_menu.isVisible():
-            radial_menu.dismiss()
+        if self._is_radial_menu_visible():
+            self._close_radial_menu_process()
             return
-        self._refresh_radial_menu()
-        radial_menu.show_at(QPoint(gx, gy))
+        self._start_radial_menu_process(gx, gy)
 
-    def _ensure_radial_menu(self) -> RadialMenu:
-        if self._radial_menu is not None:
-            return self._radial_menu
-
-        radial_menu = RadialMenu()
-        radial_menu.lock_toggled.connect(self._on_lock_toggled)
-        radial_menu.add_item(
-            "", _tr("PetWindow.radial_chat"), QColor(138, 43, 226),
-            glyph="\U0001F4AC",
-            on_click=self._on_radial_chat,
-        )
-        radial_menu.add_item(
-            "", _tr("PetWindow.radial_costume"), QColor(220, 50, 120),
-            glyph="\U0001F457",
-            on_click=self._on_radial_costume,
-        )
-        radial_menu.add_item(
-            "", _tr("PetWindow.radial_motion"), QColor(30, 144, 255),
-            glyph="\U0001F3AC",
-            on_click=self._on_radial_motion,
-        )
-        radial_menu.add_item(
-            "", _tr("PetWindow.radial_pixel"), QColor(34, 180, 140),
-            glyph="\U0001F47E",
-            on_click=self._on_radial_pixel,
-            enabled=False,
-        )
-        self._radial_menu = radial_menu
-        return radial_menu
-
-    def _refresh_radial_menu(self):
-        if self._radial_menu is None:
-            return
-        self._radial_menu.set_animation_fps(self._fps)
-        self._radial_menu.set_locked(self._live2d_widget._drag_locked)
+    def _radial_menu_payload(self, gx: int, gy: int) -> dict:
+        _pixel_widget_class, _load_pixel_frames, pixel_path_for_character = _pixel_pet_support()
         pixel_label = _tr("PetWindow.radial_live2d") if self._pixel_mode else _tr("PetWindow.radial_pixel")
         pixel_glyph = "L2D" if self._pixel_mode else "\U0001F47E"
         pixel_enabled = True if self._pixel_mode else bool(pixel_path_for_character(self._current_char))
-        self._radial_menu.update_item(
-            3,
-            label=pixel_label,
-            glyph=pixel_glyph,
-            enabled=pixel_enabled,
-        )
+        return {
+            "x": int(gx),
+            "y": int(gy),
+            "fps": int(self._fps),
+            "locked": bool(self._live2d_widget._drag_locked),
+            "items": [
+                {
+                    "action": "chat",
+                    "label": _tr("PetWindow.radial_chat"),
+                    "glyph": "\U0001F4AC",
+                    "color": [138, 43, 226],
+                    "enabled": True,
+                },
+                {
+                    "action": "costume",
+                    "label": _tr("PetWindow.radial_costume"),
+                    "glyph": "\U0001F457",
+                    "color": [220, 50, 120],
+                    "enabled": True,
+                },
+                {
+                    "action": "motion",
+                    "label": _tr("PetWindow.radial_motion"),
+                    "glyph": "\U0001F3AC",
+                    "color": [30, 144, 255],
+                    "enabled": True,
+                },
+                {
+                    "action": "pixel",
+                    "label": pixel_label,
+                    "glyph": pixel_glyph,
+                    "color": [34, 180, 140],
+                    "enabled": pixel_enabled,
+                },
+            ],
+        }
 
-    def _prewarm_radial_menu(self):
-        if self._radial_menu_prewarmed or not self.isVisible():
+    def _start_radial_menu_process(self, gx: int, gy: int):
+        base_dir = str(app_base_dir())
+        process = QProcess(self)
+        payload = json.dumps(self._radial_menu_payload(gx, gy), ensure_ascii=False)
+        program, arguments = process_program_and_args(base_dir, "radial_menu_process.py", ["--payload", payload])
+        process.setProgram(program)
+        process.setArguments(arguments)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        process.readyReadStandardOutput.connect(lambda p=process: self._read_radial_menu_process_output(p))
+        process.readyReadStandardError.connect(lambda p=process: self._read_radial_menu_process_error(p))
+        process.finished.connect(lambda *_args, p=process: self._on_radial_menu_process_finished(p))
+        process.errorOccurred.connect(lambda _error, p=process: self._on_radial_menu_process_finished(p))
+        self._radial_menu_buffer = ""
+        self._radial_menu_process = process
+        process.start()
+
+    def _is_radial_menu_visible(self) -> bool:
+        process = self._radial_menu_process
+        return process is not None and process.state() != QProcess.ProcessState.NotRunning
+
+    def _close_radial_menu_process(self, force: bool = False):
+        process = self._radial_menu_process
+        if process is None:
             return
-        radial_menu = self._ensure_radial_menu()
-        self._refresh_radial_menu()
-        radial_menu.prepare_for_show()
-        self._radial_menu_prewarmed = True
+        if process.state() != QProcess.ProcessState.NotRunning:
+            process.terminate()
+            if force and not process.waitForFinished(300):
+                process.kill()
+                process.waitForFinished(300)
+        if self._radial_menu_process is process:
+            self._radial_menu_process = None
+            self._radial_menu_buffer = ""
+        process.deleteLater()
+
+    def _read_radial_menu_process_output(self, process: QProcess):
+        data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        buffer = self._radial_menu_buffer + data
+        lines = buffer.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            self._radial_menu_buffer = lines.pop()
+        else:
+            self._radial_menu_buffer = ""
+        for raw_line in lines:
+            self._handle_radial_menu_process_line(raw_line.rstrip("\r\n"))
+
+    def _read_radial_menu_process_error(self, process: QProcess):
+        data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+        if data:
+            print(data, file=sys.stderr, end="")
+
+    def _handle_radial_menu_process_line(self, line: str):
+        if line.startswith("ACT\t"):
+            action = line.split("\t", 1)[1].strip()
+            handlers = {
+                "chat": self._on_radial_chat,
+                "costume": self._on_radial_costume,
+                "motion": self._on_radial_motion,
+                "pixel": self._on_radial_pixel,
+            }
+            handler = handlers.get(action)
+            if handler is not None:
+                handler()
+        elif line.startswith("LOCK\t"):
+            self._on_lock_toggled(line.split("\t", 1)[1].strip() == "1")
+
+    def _on_radial_menu_process_finished(self, process: QProcess):
+        if self._radial_menu_process is process:
+            self._radial_menu_process = None
+            self._radial_menu_buffer = ""
+        process.deleteLater()
 
     def _on_radial_chat(self):
         self._note_user_interaction()
@@ -1612,7 +1706,8 @@ class PetWindow(QWidget):
 
     def _ensure_compact_ai_window(self):
         if self._compact_ai_window is None:
-            self._compact_ai_window = CompactAIWindow(
+            compact_ai_window_class = _compact_ai_window_class()
+            self._compact_ai_window = compact_ai_window_class(
                 self._current_char,
                 self._model_manager,
                 self._cfg,
@@ -1997,6 +2092,7 @@ class PetWindow(QWidget):
             self._enable_pixel_mode()
 
     def _load_pixel_for_current_character(self) -> bool:
+        _pixel_widget_class, load_pixel_frames, pixel_path_for_character = _pixel_pet_support()
         path = pixel_path_for_character(self._current_char)
         if not path:
             self._pixel_ready = False
@@ -2214,13 +2310,16 @@ class PetWindow(QWidget):
             self._cfg.save()
 
     def _quit(self):
-        QApplication.instance().removeEventFilter(self)
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._close_radial_menu_process(force=True)
         self._close_chat_process()
         self._close_compact_ai_window()
         self._close_settings_process()
         if self._tray_icon is not None:
             self._tray_icon.hide()
-        QApplication.quit()
+        QCoreApplication.quit()
 
     def contextMenuEvent(self, event):
         event.accept()
@@ -2238,11 +2337,12 @@ class PetWindow(QWidget):
         # — and on macOS it depends on the NSWindow already existing, so defer
         # to the next event loop tick alongside the polish call above.
         QTimer.singleShot(0, self._apply_game_topmost_state)
-        QTimer.singleShot(0, self._prewarm_radial_menu)
         if self._show_pos_set and self._is_position_on_screen():
             self._sync_compact_ai_window(allow_create=True)
             return
-        screen = QApplication.primaryScreen()
+        from PySide6.QtGui import QGuiApplication
+
+        screen = QGuiApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
             self.move(
@@ -2254,7 +2354,9 @@ class PetWindow(QWidget):
         self._sync_compact_ai_window(allow_create=True)
 
     def _is_position_on_screen(self) -> bool:
-        screen = QApplication.primaryScreen()
+        from PySide6.QtGui import QGuiApplication
+
+        screen = QGuiApplication.primaryScreen()
         if screen is None:
             return False
         geo = screen.availableGeometry()

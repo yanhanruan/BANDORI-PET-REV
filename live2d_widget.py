@@ -2,7 +2,6 @@ import ctypes
 import sys
 import OpenGL.GL as gl
 from PySide6.QtCore import Qt, QPoint, QElapsedTimer, QTimer, Signal
-from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent, QContextMenuEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from live2d_quality import LIVE2D_QUALITY_PROFILES, normalize_live2d_quality
 from lua_hit_area_projection import LuaCustomHitAreaState
@@ -15,6 +14,8 @@ class Live2DWidget(QOpenGLWidget):
     @staticmethod
     def configure_default_surface_format():
         """Apply the OpenGL surface format Live2D requires."""
+        from PySide6.QtGui import QSurfaceFormat
+
         fmt = QSurfaceFormat()
         fmt.setAlphaBufferSize(8)
         fmt.setSamples(0)
@@ -125,6 +126,8 @@ class Live2DWidget(QOpenGLWidget):
         return self._model_path
 
     def _safe_make_current(self):
+        from PySide6.QtGui import QOpenGLContext
+
         if QOpenGLContext.currentContext() != self.context():
             self.makeCurrent()
 
@@ -305,11 +308,11 @@ class Live2DWidget(QOpenGLWidget):
     # 事件处理与交互
     # --------------------------------------------------------------------------
 
-    def moveEvent(self, event: QMoveEvent):
+    def moveEvent(self, event):
         self._update_global_pos_cache()
         super().moveEvent(event)
 
-    def resizeEvent(self, event: QResizeEvent):
+    def resizeEvent(self, event):
         size = event.size()
         self._cache_w, self._cache_h = size.width(), size.height()
         self._cache_w_half = self._cache_w * 0.5
@@ -323,7 +326,7 @@ class Live2DWidget(QOpenGLWidget):
         self._cache_global_x, self._cache_global_y = x, y
         return moved
 
-    def mousePressEvent(self, event: QMouseEvent):
+    def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.RightButton:
             pos = event.scenePosition()
             gpos = event.globalPosition()
@@ -361,7 +364,7 @@ class Live2DWidget(QOpenGLWidget):
             self._drag_start_x = self._drag_origin_x = gpos.x()
             self._drag_start_y = self._drag_origin_y = gpos.y()
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
+    def mouseReleaseEvent(self, event):
         pos = event.scenePosition()
         x, y = pos.x(), pos.y()
 
@@ -390,7 +393,7 @@ class Live2DWidget(QOpenGLWidget):
         if should_click:
             self._click_callback(x, y, self.hit_area_name_at(x, y))
 
-    def contextMenuEvent(self, event: QContextMenuEvent):
+    def contextMenuEvent(self, event):
         if self._suppress_next_context_menu:
             self._suppress_next_context_menu = False
             event.accept()
@@ -402,7 +405,7 @@ class Live2DWidget(QOpenGLWidget):
             return
         super().contextMenuEvent(event)
 
-    def mouseMoveEvent(self, event: QMouseEvent):
+    def mouseMoveEvent(self, event):
         if self._drag_locked or not (self._dragging and self._window_drag_callback):
             return
             
@@ -453,6 +456,8 @@ class Live2DWidget(QOpenGLWidget):
         self._model.Drag(local_x, local_y)
 
     def _poll_head_tracking(self):
+        from PySide6.QtGui import QCursor
+
         pos = QCursor.pos()
         self._track_head_at_global(pos.x(), pos.y())
 
@@ -470,6 +475,8 @@ class Live2DWidget(QOpenGLWidget):
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glDisable(gl.GL_DITHER)
         
+        from PySide6.QtGui import QGuiApplication
+
         self._system_scale = QGuiApplication.primaryScreen().devicePixelRatio()
         self._initialized_gl = True
         self._cache_w, self._cache_h = self.width(), self.height()
