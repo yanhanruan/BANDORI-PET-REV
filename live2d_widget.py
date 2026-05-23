@@ -496,9 +496,6 @@ class Live2DWidget(QOpenGLWidget):
         if (self._static_render and self._static_render_done) or not self._live2d or not self._model:
             return
 
-        gl.glClearColor(*self._clear_color)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_STENCIL_BUFFER_BIT)
-
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendEquationSeparate(gl.GL_FUNC_ADD, gl.GL_FUNC_ADD)
 
@@ -524,11 +521,8 @@ class Live2DWidget(QOpenGLWidget):
             self._lip_sync_level = 0.0
         if abs(self._lip_sync_form) < 0.01:
             self._lip_sync_form = 0.0
-        try:
-            self._model.SetParameterValue("PARAM_MOUTH_OPEN_Y", self._lip_sync_level, 1.0)
-            self._model.SetParameterValue("PARAM_MOUTH_FORM", self._lip_sync_form, 1.0)
-        except Exception:
-            pass
+        self._model.SetParameterValue("PARAM_MOUTH_OPEN_Y", self._lip_sync_level, 1.0)
+        self._model.SetParameterValue("PARAM_MOUTH_FORM", self._lip_sync_form, 1.0)
 
     # --------------------------------------------------------------------------
     # 碰撞检测 & Alpha 抓取逻辑
@@ -619,29 +613,20 @@ class Live2DWidget(QOpenGLWidget):
         return self._has_sdk_hit_areas() or self._custom_hit_areas.has_projected_areas()
 
     def _has_sdk_hit_areas(self) -> bool:
-        try:
-            return self._model.modelSetting.getHitAreaNum() > 0
-        except Exception:
-            return False
+        return self._model and self._model.modelSetting.getHitAreaNum() > 0
 
     def _is_in_sdk_hit_area(self, x: float, y: float) -> bool:
         return bool(self._sdk_hit_area_name_at(x, y))
 
     def _sdk_hit_area_name_at(self, x: float, y: float) -> str:
-        try:
-            if not self._has_sdk_hit_areas(): return ""
-            return str(self._model.HitTest("", x, y) or "").strip().lower()
-        except Exception:
-            return ""
+        if not self._has_sdk_hit_areas(): return ""
+        return str(self._model.HitTest("", x, y) or "").strip().lower()
 
     def _is_in_custom_hit_area(self, x: float, y: float) -> bool:
         return bool(self._custom_hit_area_name_at(x, y))
 
     def _custom_hit_area_name_at(self, x: float, y: float) -> str:
-        try:
-            return self._custom_hit_areas.hit_test_name(x, y).strip().lower()
-        except Exception:
-            return ""
+        return self._custom_hit_areas.hit_test_name(x, y).strip().lower()
 
     # --------------------------------------------------------------------------
     # PBO & 像素读取核心
@@ -656,10 +641,7 @@ class Live2DWidget(QOpenGLWidget):
         self._clear_pending_hit_pbos()
 
     def _safe_unbind_pbo(self):
-        try:
-            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
-        except Exception:
-            pass
+        gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
 
     def visible_model_bounds(self):
         if not self._initialized_gl or not self._model: return None
@@ -675,13 +657,10 @@ class Live2DWidget(QOpenGLWidget):
         width, height = int(self._cache_w * self._system_scale), int(self._cache_h * self._system_scale)
         if width <= 0 or height <= 0: return None
         
-        try:
-            self._safe_make_current()
-            self._process_hit_pbo_results()
-            self._safe_unbind_pbo()
-            data = gl.glReadPixels(0, 0, width, height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE)
-        except Exception:
-            return None
+        self._safe_make_current()
+        self._process_hit_pbo_results()
+        self._safe_unbind_pbo()
+        data = gl.glReadPixels(0, 0, width, height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE)
 
         if not data: return None
 
@@ -738,21 +717,17 @@ class Live2DWidget(QOpenGLWidget):
         for request in pending:
             fence = request.get("fence")
             if fence:
-                try: gl.glDeleteSync(fence)
-                except Exception: pass
+                gl.glDeleteSync(fence)
 
     def _process_hit_pbo_results(self):
         if not self._hit_pbo_supported or not self._hit_pbo_pending: return
         
         ready, still_pending = [], []
         for request in self._hit_pbo_pending:
-            try:
-                status = gl.glClientWaitSync(request.get("fence"), 0, 0)
-                if status in (gl.GL_ALREADY_SIGNALED, gl.GL_CONDITION_SATISFIED):
-                    ready.append(request)
-                else:
-                    still_pending.append(request)
-            except Exception:
+            status = gl.glClientWaitSync(request.get("fence"), 0, 0)
+            if status in (gl.GL_ALREADY_SIGNALED, gl.GL_CONDITION_SATISFIED):
+                ready.append(request)
+            else:
                 still_pending.append(request)
                 
         self._hit_pbo_pending = still_pending
@@ -760,20 +735,15 @@ class Live2DWidget(QOpenGLWidget):
         
         for request in ready:
             fence = request.get("fence")
-            try:
-                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, request["pbo"])
-                ptr = gl.glMapBuffer(gl.GL_PIXEL_PACK_BUFFER, gl.GL_READ_ONLY)
-                if ptr:
-                    data = ctypes.string_at(ptr, self._hit_pbo_size)
-                    self._hit_alpha_cache[request["key"]] = (data[3], now)
-                    gl.glUnmapBuffer(gl.GL_PIXEL_PACK_BUFFER)
-            except Exception:
-                pass
-            finally:
-                self._safe_unbind_pbo()
-                if fence:
-                    try: gl.glDeleteSync(fence)
-                    except Exception: pass
+            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, request["pbo"])
+            ptr = gl.glMapBuffer(gl.GL_PIXEL_PACK_BUFFER, gl.GL_READ_ONLY)
+            if ptr:
+                data = ctypes.string_at(ptr, self._hit_pbo_size)
+                self._hit_alpha_cache[request["key"]] = (data[3], now)
+                gl.glUnmapBuffer(gl.GL_PIXEL_PACK_BUFFER)
+            self._safe_unbind_pbo()
+            if fence:
+                gl.glDeleteSync(fence)
                     
         # 缓存清理机制
         if len(self._hit_alpha_cache) > 128:
@@ -849,15 +819,12 @@ class Live2DWidget(QOpenGLWidget):
         sx, sy, key, now, cached_alpha = ctx
         if cached_alpha is not None: return cached_alpha
 
-        try:
-            pixel = (ctypes.c_ubyte * 4)()
-            self._safe_unbind_pbo()
-            gl.glReadPixels(sx, sy, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, pixel)
-            alpha = int(pixel[3])
-            self._hit_alpha_cache[key] = (alpha, now)
-            return alpha
-        except Exception:
-            return 0
+        pixel = (ctypes.c_ubyte * 4)()
+        self._safe_unbind_pbo()
+        gl.glReadPixels(sx, sy, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, pixel)
+        alpha = int(pixel[3])
+        self._hit_alpha_cache[key] = (alpha, now)
+        return alpha
 
     def _get_alpha_fast(self, x: float, y: float):
         ctx = self._get_alpha_read_context(x, y)
@@ -865,10 +832,6 @@ class Live2DWidget(QOpenGLWidget):
         sx, sy, key, _, cached_alpha = ctx
         if cached_alpha is not None: return cached_alpha
 
-        try:
-            self._queue_hit_pbo_read(key, sx, sy)
-            # 由于是异步列队，当前帧可能拿不到结果，检查队列是否立即命中了现有缓存机制
-            cached = self._hit_alpha_cache.get(key)
-            return cached[0] if cached else None
-        except Exception:
-            return 0
+        self._queue_hit_pbo_read(key, sx, sy)
+        cached = self._hit_alpha_cache.get(key)
+        return cached[0] if cached else None
