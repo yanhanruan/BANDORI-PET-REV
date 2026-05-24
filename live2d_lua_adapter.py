@@ -371,6 +371,12 @@ class LuaLive2DModule:
         self._set_expression = lua.eval(
             b"function(renderer, name) return renderer:set_expression(name) end"
         )
+        self._preload_expression = lua.eval(
+            b"function(renderer, name) return renderer:preload_expression(name) end"
+        )
+        self._preload_motion_group = lua.eval(
+            b"function(renderer, name) return renderer:preload_motion_group(name) end"
+        )
         self._reset_expression = lua.eval(b"function(renderer) return renderer:reset_expression() end")
         self._lua = lua
         self._initialized = True
@@ -503,6 +509,16 @@ class LuaLAppModel:
         if count <= 0:
             return
         self.StartMotion(name, random.randrange(count), priority)
+
+    def PreloadMotionGroup(self, name: str):
+        if self._renderer is None or not name:
+            return
+        self._module._preload_motion_group(self._renderer, str(name).encode("utf-8"))
+
+    def PreloadExpression(self, name: str):
+        if self._renderer is None or not name:
+            return
+        self._module._preload_expression(self._renderer, str(name).encode("utf-8"))
 
     def ClearMotions(self):
         self._module._clear_motions(self._renderer)

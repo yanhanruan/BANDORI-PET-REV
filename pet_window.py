@@ -29,6 +29,7 @@ from live2d_quality import clamp_live2d_scale, normalize_live2d_quality
 from live2d_widget import DEFAULT_HIT_ALPHA_THRESHOLD, DEFAULT_LIP_SYNC_MAX_OPEN, Live2DWidget
 from model_manager import ModelManager
 from process_utils import app_base_dir, ipc_server_name, process_program_and_args
+from zst_model_archive import prefetch_virtual_action_resources
 
 if sys.platform == "darwin":
     import macos_patch
@@ -307,6 +308,10 @@ class PetWindow(QWidget):
         self._show_pos_set = False
         self._motion_guard_token = 0
         self._expression_guard_token = 0
+        self._live2d_prewarm_token = 0
+        self._live2d_prewarm_motion_queue = []
+        self._live2d_prewarm_expression_queue = []
+        self._live2d_prewarm_prefetched = False
         self._exp_map_cache = ({}, [])
         self._exp_map_cache_id = None
         self._click_expression_hold_until = 0.0
@@ -832,6 +837,7 @@ class PetWindow(QWidget):
 
     def _on_live2d_model_loaded(self):
         self._motion_guard_token += 1
+        self._live2d_prewarm_token += 1
         self._last_context_idle_action_at = 0.0
         self._cursor_was_near_live2d = False
         self._cursor_near_live2d_since = 0.0
@@ -839,7 +845,104 @@ class PetWindow(QWidget):
         self._exp_map_cache = ({}, [])
         self._exp_map_cache_id = None
         QTimer.singleShot(120, lambda t=self._motion_guard_token: self._restore_default_motion(t, force_clear=False))
+        self._schedule_live2d_action_prewarm(self._live2d_prewarm_token)
         QTimer.singleShot(0, lambda: self._sync_compact_ai_window(allow_create=True))
+
+    def _schedule_live2d_action_prewarm(self, token: int):
+        self._live2d_prewarm_motion_queue = self._build_live2d_prewarm_motion_queue()
+        self._live2d_prewarm_expression_queue = self._build_live2d_prewarm_expression_queue()
+        self._live2d_prewarm_prefetched = False
+        QTimer.singleShot(350, lambda t=token: self._prewarm_next_live2d_action(t))
+
+    def _prefetch_live2d_action_resources(self):
+        if self._live2d_prewarm_prefetched:
+            return
+        self._live2d_prewarm_prefetched = True
+        try:
+            prefetch_virtual_action_resources(
+                self._live2d_widget.model_path,
+                self._live2d_prewarm_motion_queue,
+                self._live2d_prewarm_expression_queue,
+            )
+        except Exception:
+            pass
+
+    def _build_live2d_prewarm_motion_queue(self) -> list[str]:
+        model = self._live2d_widget.model
+        if model is None:
+            return []
+        motion_names = self._current_motion_names()
+        motion_set = set(motion_names)
+        ordered = []
+
+        def add(name: str):
+            name = str(name or "")
+            if name in motion_set and name not in ordered:
+                ordered.append(name)
+
+        entry = self._current_model_entry()
+        add(entry.get("default_motion", ""))
+        for feedback in normalize_click_motion_actions(
+            entry.get("click_motion_actions", {}),
+            motion_names,
+            self._current_expression_names(),
+        ).values():
+            add(feedback.get("motion", ""))
+        for tag in ("smile", "nf", "idle02", "surprised", "stretch", "akubi", "sigh", "sleep", "sad", "stare", "mitore", "thinking", "eeto", "odoodo"):
+            add(self._resolve_motion_tag(tag, motion_names))
+        for name in motion_names:
+            if not str(name).lower().startswith(("idle", "sys-")):
+                add(name)
+        for name in motion_names:
+            add(name)
+        return ordered
+
+    def _build_live2d_prewarm_expression_queue(self) -> list[str]:
+        expression_names = self._current_expression_names()
+        expression_set = set(expression_names)
+        ordered = []
+
+        def add(name: str):
+            name = str(name or "")
+            if name in expression_set and name not in ordered:
+                ordered.append(name)
+
+        entry = self._current_model_entry()
+        add(entry.get("default_expression", ""))
+        for feedback in normalize_click_motion_actions(
+            entry.get("click_motion_actions", {}),
+            self._current_motion_names(),
+            expression_names,
+        ).values():
+            add(feedback.get("expression", ""))
+        for tag in ("smile", "default", "idle", "surprised", "sad", "sleep"):
+            add(self._find_expression_tag(tag))
+        for name in expression_names:
+            add(name)
+        return ordered
+
+    def _prewarm_next_live2d_action(self, token: int):
+        if token != self._live2d_prewarm_token or self._pixel_mode:
+            return
+        model = self._live2d_widget.model
+        if model is None:
+            return
+        self._prefetch_live2d_action_resources()
+        if self._live2d_prewarm_motion_queue:
+            name = self._live2d_prewarm_motion_queue.pop(0)
+            try:
+                model.PreloadMotionGroup(name)
+            except Exception:
+                pass
+            QTimer.singleShot(45, lambda t=token: self._prewarm_next_live2d_action(t))
+            return
+        if self._live2d_prewarm_expression_queue:
+            name = self._live2d_prewarm_expression_queue.pop(0)
+            try:
+                model.PreloadExpression(name)
+            except Exception:
+                pass
+            QTimer.singleShot(45, lambda t=token: self._prewarm_next_live2d_action(t))
 
     def _note_user_interaction(self):
         self._last_user_interaction_at = time.monotonic()
