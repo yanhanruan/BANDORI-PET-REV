@@ -30,7 +30,6 @@ from qfluentwidgets.components.widgets.menu import (
     LineEditMenu,
     MenuAnimationManager,
     MenuAnimationType,
-    TextEditMenu,
 )
 from qfluentwidgets.common.config import qconfig
 
@@ -105,11 +104,11 @@ from live2d_click_actions import (
     normalize_click_motion_actions,
 )
 from live2d_quality import LIVE2D_SCALE_MAX, LIVE2D_SCALE_MIN, clamp_live2d_scale, normalize_live2d_quality
-from ui_helpers import rounded_avatar_pixmap
+from ui_helpers import AVATAR_EXTENSIONS, FluentContextTextEdit, rounded_avatar_pixmap
 
 _BG_LIGHT = "#ffffff"
 _BG_DARK = "#1e1e1e"
-_AVATAR_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_AVATAR_EXTENSIONS = AVATAR_EXTENSIONS
 
 _ROLEPLAY_STATUS_COLORS = {
     "green": "#2ecc71",
@@ -307,12 +306,6 @@ def _rounded_avatar_pixmap(path: str, size: int) -> QPixmap:
 class FluentContextLineEdit(QLineEdit):
     def contextMenuEvent(self, event):
         menu = LineEditMenu(self)
-        menu.exec(event.globalPos(), ani=True)
-
-
-class FluentContextTextEdit(QTextEdit):
-    def contextMenuEvent(self, event):
-        menu = TextEditMenu(self)
         menu.exec(event.globalPos(), ani=True)
 
 
@@ -530,10 +523,6 @@ class OpaqueDropDownComboBoxMenu(ComboBoxMenu):
         self.show()
         if getattr(self, "isSubMenu", False) and getattr(self, "menuItem", None):
             self.menuItem.setSelected(True)
-
-
-def _clamp_live2d_scale(value: object) -> int:
-    return clamp_live2d_scale(value, use_device_pixel_ratio_default=True)
 
 
 class ModelListItem(QWidget):
@@ -1362,8 +1351,9 @@ class SettingsWindow(QWidget):
         self._live2d_quality = normalize_live2d_quality(
             self._cfg.get("live2d_quality", "balanced") if self._cfg else "balanced"
         )
-        self._live2d_scale = _clamp_live2d_scale(
-            self._cfg.get("live2d_scale", 0) if self._cfg else 0
+        self._live2d_scale = clamp_live2d_scale(
+            self._cfg.get("live2d_scale", 0) if self._cfg else 0,
+            use_device_pixel_ratio_default=True,
         )
         self._fluent_chat_window_enabled = (
             bool(self._cfg.get("fluent_chat_window_enabled", False)) if self._cfg else False
@@ -6425,7 +6415,10 @@ class SettingsWindow(QWidget):
         if self._configured_models:
             self._selected_list_character = self._current_char or self._configured_models[0]["character"]
         self._live2d_quality = normalize_live2d_quality(self._cfg.get("live2d_quality", "balanced"))
-        self._live2d_scale = _clamp_live2d_scale(self._cfg.get("live2d_scale", 0))
+        self._live2d_scale = clamp_live2d_scale(
+            self._cfg.get("live2d_scale", 0),
+            use_device_pixel_ratio_default=True,
+        )
         self._fluent_chat_window_enabled = bool(self._cfg.get("fluent_chat_window_enabled", False))
         self._fps = int(self._cfg.get("fps", self._fps) or self._fps)
         self._opacity = float(self._cfg.get("opacity", self._opacity) or self._opacity)
@@ -7021,7 +7014,7 @@ class SettingsWindow(QWidget):
         )
 
     def _set_live2d_scale_controls(self, value: int):
-        value = _clamp_live2d_scale(value)
+        value = clamp_live2d_scale(value, use_device_pixel_ratio_default=True)
         self._live2d_scale = value
         self._live2d_scale_input.blockSignals(True)
         self._live2d_scale_slider.setValue(value)

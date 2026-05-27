@@ -14,7 +14,7 @@ from PySide6.QtCore import QByteArray, QEventLoop, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from i18n_manager import tr as _tr
-from process_utils import app_base_dir
+from process_utils import app_base_dir, hidden_subprocess_kwargs
 
 _PROTOCOL_VERSION = "2025-06-18"
 _TOOL_PREFIX = "mcp__"
@@ -25,18 +25,6 @@ _thread_local = threading.local()
 _APP_DIR = Path(app_base_dir()).resolve()
 _BUNDLED_STDIO_MCP_SCRIPT = (_APP_DIR / "filesystem_mcp_server.py").resolve()
 _ALLOWED_STDIO_PYTHON_COMMANDS = {"python", "python.exe", "pythonw.exe", "py", "py.exe"}
-
-
-def _hidden_subprocess_kwargs() -> dict:
-    if os.name != "nt":
-        return {}
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = subprocess.SW_HIDE
-    return {
-        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        "startupinfo": startupinfo,
-    }
 
 
 @dataclass
@@ -538,7 +526,7 @@ class StdioMcpClient:
             cwd=cwd,
             text=False,
             bufsize=0,
-            **_hidden_subprocess_kwargs(),
+            **hidden_subprocess_kwargs(),
         )
         self._reader = threading.Thread(target=self._read_stdout, name=f"MCP:{server.get('label','stdio')}", daemon=True)
         self._reader.start()
