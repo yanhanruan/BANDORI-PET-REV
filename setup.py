@@ -173,7 +173,13 @@ class BuildMacWithResourceLinks(bdist_mac):
             self._codesign(self.bundle_dir)
 
     def _link_root_resource_files(self):
-        for filename in ("logo.ico", "band.json", "outfit.json", "custom_hit_area_state.ljbc"):
+        for filename in (
+            "logo.ico",
+            "band.json",
+            "outfit.json",
+            "custom_hit_area_state.ljbc",
+            "live2d_platform_manager_override.ljbc",
+        ):
             source = Path(self.resources_dir) / filename
             origin = Path(self.bin_dir) / filename
             if not source.exists() or origin.exists():
@@ -448,6 +454,7 @@ include_files = [
     include_if_exists("band.json"),
     include_if_exists("outfit.json"),
     _compiled_lua_include("custom_hit_area_state.lua"),
+    _compiled_lua_include("live2d_platform_manager_override.lua"),
     *(include_if_exists(dirname) for dirname in INNO_RESOURCE_DIRS),
     include_package_subdir("_sounddevice_data", "portaudio-binaries"),
     include_package_dir("_soundfile_data"),
