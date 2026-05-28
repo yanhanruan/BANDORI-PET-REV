@@ -476,6 +476,7 @@
     "SettingsWindow.update_channel_source": "Git source",
     "SettingsWindow.update_channel_source_unmanaged": "Source folder",
     "SettingsWindow.update_channel_portable": "Portable exe",
+    "SettingsWindow.update_channel_inno": "Inno Setup installer",
     "SettingsWindow.update_channel_msi": "MSI installer",
     "SettingsWindow.update_channel_unknown": "Unknown",
     "SettingsWindow.side_settings": "Settings",

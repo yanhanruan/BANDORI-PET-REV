@@ -476,6 +476,7 @@
     "SettingsWindow.update_channel_source": "Git ソース",
     "SettingsWindow.update_channel_source_unmanaged": "ソースフォルダー",
     "SettingsWindow.update_channel_portable": "ポータブル exe",
+    "SettingsWindow.update_channel_inno": "Inno Setup インストーラー",
     "SettingsWindow.update_channel_msi": "MSI インストーラー",
     "SettingsWindow.update_channel_unknown": "不明",
     "SettingsWindow.side_settings": "設定",

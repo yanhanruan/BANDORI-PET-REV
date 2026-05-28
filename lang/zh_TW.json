@@ -476,6 +476,7 @@
     "SettingsWindow.update_channel_source": "原始碼 Git",
     "SettingsWindow.update_channel_source_unmanaged": "原始碼資料夾",
     "SettingsWindow.update_channel_portable": "便攜版 exe",
+    "SettingsWindow.update_channel_inno": "Inno Setup 安裝包",
     "SettingsWindow.update_channel_msi": "MSI 安裝包",
     "SettingsWindow.update_channel_unknown": "未知",
     "SettingsWindow.side_settings": "設定",
