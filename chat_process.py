@@ -3,7 +3,7 @@ import json
 import os
 import sys
 
-from process_utils import app_base_dir, configure_debug_logging, ipc_server_name
+from process_utils import app_base_dir, configure_debug_logging, install_parent_death_watch, ipc_server_name
 
 configure_debug_logging()
 
