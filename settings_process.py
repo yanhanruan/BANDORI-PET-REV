@@ -53,6 +53,7 @@ def main():
     set_windows_app_user_model_id("BandoriPet.Settings")
 
     app = QApplication(sys.argv)
+    install_parent_death_watch(app)
 
     if sys.platform == "darwin":
         import macos_patch
