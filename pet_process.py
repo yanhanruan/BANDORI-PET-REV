@@ -128,6 +128,13 @@ _x11_open_display = None
 _x11_close_display = None
 _x11_default_root_window = None
 _x11_query_pointer = None
+_x11_intern_atom = None
+_x11_change_property = None
+_x11_query_tree = None
+_x11_fetch_name = None
+_x11_free = None
+_x11_set_wm_hints = None
+_x11_flush = None
 if sys.platform.startswith("linux"):
     try:
         _x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
@@ -153,12 +160,80 @@ if sys.platform.startswith("linux"):
             ctypes.POINTER(ctypes.c_uint),
         ]
         _x11_query_pointer.restype = ctypes.c_int
+        _x11_intern_atom = _x11.XInternAtom
+        _x11_intern_atom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        _x11_intern_atom.restype = ctypes.c_ulong
+        _x11_change_property = _x11.XChangeProperty
+        _x11_change_property.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        _x11_change_property.restype = ctypes.c_int
+        _x11_query_tree = _x11.XQueryTree
+        _x11_query_tree.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
+        _x11_query_tree.restype = ctypes.c_int
+        _x11_fetch_name = _x11.XFetchName
+        _x11_fetch_name.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_char_p),
+        ]
+        _x11_fetch_name.restype = ctypes.c_int
+        _x11_free = _x11.XFree
+        _x11_free.argtypes = [ctypes.c_void_p]
+        _x11_free.restype = ctypes.c_int
+        _x11_set_wm_hints = _x11.XSetWMHints
+        _x11_set_wm_hints.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p]
+        _x11_set_wm_hints.restype = ctypes.c_int
+        _x11_flush = _x11.XFlush
+        _x11_flush.argtypes = [ctypes.c_void_p]
+        _x11_flush.restype = ctypes.c_int
     except (AttributeError, OSError, TypeError):
         _x11 = None
         _x11_open_display = None
         _x11_close_display = None
         _x11_default_root_window = None
         _x11_query_pointer = None
+        _x11_intern_atom = None
+        _x11_change_property = None
+        _x11_query_tree = None
+        _x11_fetch_name = None
+        _x11_free = None
+        _x11_set_wm_hints = None
+        _x11_flush = None
+
+
+class _XWMHints(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_long),
+        ("input", ctypes.c_int),
+        ("initial_state", ctypes.c_int),
+        ("icon_pixmap", ctypes.c_ulong),
+        ("icon_window", ctypes.c_ulong),
+        ("icon_x", ctypes.c_int),
+        ("icon_y", ctypes.c_int),
+        ("icon_mask", ctypes.c_ulong),
+        ("window_group", ctypes.c_ulong),
+    ]
+
+
+XA_ATOM = 4
+XA_CARDINAL = 6
+PROP_MODE_REPLACE = 0
+X_WM_HINT_INPUT = 1 << 0
 
 
 def _parse_args():
@@ -651,6 +726,7 @@ class LightweightPet:
         self.hwnd = 0
         self.x11_display = None
         self.x11_root_window = 0
+        self.x11_window = 0
         self.mouse_passthrough = False
         self.mouse_passthrough_supported = False
         self.native_hit_test = False
@@ -794,6 +870,7 @@ class LightweightPet:
         glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)
         glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+        glfw.window_hint(glfw.FOCUSED, glfw.FALSE)
         glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.FALSE)
         self.window = glfw.create_window(self.width, self.height, f"BandoriPet-{self.character}", None, None)
         if self.window is None:
@@ -867,8 +944,6 @@ class LightweightPet:
     def _init_x11_input_support(self):
         if _x11_open_display is None or _x11_default_root_window is None or _x11_query_pointer is None:
             return
-        if not hasattr(glfw, "MOUSE_PASSTHROUGH") or not hasattr(glfw, "set_window_attrib"):
-            return
         if hasattr(glfw, "get_platform") and glfw.get_platform() != glfw.PLATFORM_X11:
             return
         display = _x11_open_display(None)
@@ -876,7 +951,12 @@ class LightweightPet:
             return
         self.x11_display = display
         self.x11_root_window = int(_x11_default_root_window(display))
-        self.mouse_passthrough_supported = True
+        self.x11_window = self._find_x11_window_by_title(f"BandoriPet-{self.character}")
+        self._apply_x11_window_style()
+        self.mouse_passthrough_supported = hasattr(glfw, "MOUSE_PASSTHROUGH") and hasattr(
+            glfw,
+            "set_window_attrib",
+        )
 
     def _close_x11_input_support(self):
         if self.x11_display is None:
@@ -888,7 +968,116 @@ class LightweightPet:
                 _x11_close_display(self.x11_display)
             self.x11_display = None
             self.x11_root_window = 0
+            self.x11_window = 0
             self.mouse_passthrough_supported = False
+
+    def _x11_atom(self, name: str) -> int:
+        if self.x11_display is None or _x11_intern_atom is None:
+            return 0
+        return int(_x11_intern_atom(self.x11_display, name.encode("ascii"), False))
+
+    def _find_x11_window_by_title(self, title: str) -> int:
+        if (
+            self.x11_display is None
+            or not self.x11_root_window
+            or _x11_query_tree is None
+            or _x11_fetch_name is None
+        ):
+            return 0
+        expected = title.encode("utf-8")
+
+        def walk(window: int, depth: int = 0) -> int:
+            if depth > 6:
+                return 0
+            name = ctypes.c_char_p()
+            if _x11_fetch_name(self.x11_display, window, ctypes.byref(name)) and name.value:
+                try:
+                    if name.value == expected:
+                        return int(window)
+                finally:
+                    if _x11_free is not None:
+                        _x11_free(ctypes.cast(name, ctypes.c_void_p))
+            root = ctypes.c_ulong()
+            parent = ctypes.c_ulong()
+            children = ctypes.POINTER(ctypes.c_ulong)()
+            count = ctypes.c_uint()
+            if not _x11_query_tree(
+                self.x11_display,
+                window,
+                ctypes.byref(root),
+                ctypes.byref(parent),
+                ctypes.byref(children),
+                ctypes.byref(count),
+            ):
+                return 0
+            try:
+                for i in range(int(count.value)):
+                    found = walk(int(children[i]), depth + 1)
+                    if found:
+                        return found
+            finally:
+                if children and _x11_free is not None:
+                    _x11_free(ctypes.cast(children, ctypes.c_void_p))
+            return 0
+
+        return walk(self.x11_root_window)
+
+    def _apply_x11_window_style(self):
+        if self.x11_display is None or not self.x11_window or _x11_change_property is None:
+            return
+        state = self._x11_atom("_NET_WM_STATE")
+        skip_taskbar = self._x11_atom("_NET_WM_STATE_SKIP_TASKBAR")
+        skip_pager = self._x11_atom("_NET_WM_STATE_SKIP_PAGER")
+        above = self._x11_atom("_NET_WM_STATE_ABOVE")
+        if state and skip_taskbar and skip_pager and above:
+            atoms = (ctypes.c_ulong * 3)(skip_taskbar, skip_pager, above)
+            _x11_change_property(
+                self.x11_display,
+                self.x11_window,
+                state,
+                XA_ATOM,
+                32,
+                PROP_MODE_REPLACE,
+                ctypes.cast(atoms, ctypes.c_void_p),
+                3,
+            )
+
+        window_type = self._x11_atom("_NET_WM_WINDOW_TYPE")
+        utility = self._x11_atom("_NET_WM_WINDOW_TYPE_UTILITY")
+        if window_type and utility:
+            atom = ctypes.c_ulong(utility)
+            _x11_change_property(
+                self.x11_display,
+                self.x11_window,
+                window_type,
+                XA_ATOM,
+                32,
+                PROP_MODE_REPLACE,
+                ctypes.byref(atom),
+                1,
+            )
+
+        user_time = self._x11_atom("_NET_WM_USER_TIME")
+        if user_time:
+            zero = ctypes.c_ulong(0)
+            _x11_change_property(
+                self.x11_display,
+                self.x11_window,
+                user_time,
+                XA_CARDINAL,
+                32,
+                PROP_MODE_REPLACE,
+                ctypes.byref(zero),
+                1,
+            )
+
+        if _x11_set_wm_hints is not None:
+            hints = _XWMHints()
+            hints.flags = X_WM_HINT_INPUT
+            hints.input = False
+            _x11_set_wm_hints(self.x11_display, self.x11_window, ctypes.byref(hints))
+        if _x11_flush is not None:
+            _x11_flush(self.x11_display)
 
     def _call_original_wndproc(self, hwnd, msg, wparam, lparam):
         if self._original_wndproc and _call_window_proc is not None:
