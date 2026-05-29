@@ -9,6 +9,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -256,10 +257,31 @@ def _load_config() -> dict:
 
 
 def _save_config(data: dict):
-    tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CONFIG_PATH)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=CONFIG_PATH.name + ".",
+        suffix=".tmp",
+        dir=str(CONFIG_PATH.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(3):
+            try:
+                os.replace(tmp_path, CONFIG_PATH)
+                return
+            except (PermissionError, OSError):
+                if attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    raise
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _cfg_get(config: dict, key: str, default=None):
@@ -838,6 +860,8 @@ class LightweightPet:
         elif line == "SHUTDOWN":
             if self.window is not None:
                 glfw.set_window_should_close(self.window, True)
+        elif line == "SAVE_POSITION":
+            self._save_position()
         elif line.startswith("PEER_POS\t"):
             parts = line.split("\t")
             if len(parts) >= 4:

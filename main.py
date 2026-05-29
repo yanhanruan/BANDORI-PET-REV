@@ -657,8 +657,13 @@ def main():
         except RuntimeError:
             pass
         if process.state() != QProcess.ProcessState.NotRunning:
+            if not force:
+                writer = shared_event_ref.get("writer")
+                if writer is not None:
+                    writer.write_line("SAVE_POSITION")
+                process.waitForFinished(500)
             process.terminate()
-            if not process.waitForFinished(1000):
+            if not process.waitForFinished(2000):
                 process.kill()
                 process.waitForFinished(1000)
         process.deleteLater()
