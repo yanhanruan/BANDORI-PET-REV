@@ -43,6 +43,12 @@ class ReminderPageMixin:
         alarm_layout.setContentsMargins(16, 14, 16, 14)
         alarm_layout.setSpacing(10)
         alarm_layout.addWidget(StrongBodyLabel(_tr("SettingsWindow.alarm_section_title", default="闹钟"), alarm_panel))
+        alarm_command_hint = _wrap_label(BodyLabel(_tr(
+            "SettingsWindow.alarm_command_hint",
+            default="对话中输入 @clock 0730 [描述]（四位数时间，0730 表示早上 7:30）可快速添加 24 小时内的时钟，默认由当前 Live2D 展示位的第一个角色生成个性化提醒。",
+        ), alarm_panel))
+        alarm_command_hint.setObjectName("reminderHint")
+        alarm_layout.addWidget(alarm_command_hint)
 
         alarm_form = QGridLayout()
         alarm_form.setHorizontalSpacing(10)
@@ -117,6 +123,12 @@ class ReminderPageMixin:
         pomodoro_layout.setContentsMargins(16, 14, 16, 14)
         pomodoro_layout.setSpacing(10)
         pomodoro_layout.addWidget(StrongBodyLabel(_tr("SettingsWindow.pomodoro_section_title", default="番茄钟"), pomodoro_panel))
+        pomodoro_command_hint = _wrap_label(BodyLabel(_tr(
+            "SettingsWindow.pomodoro_command_hint",
+            default="对话中输入 @pomodoro [循环次数] [描述] 可快速启动番茄钟，默认由当前 Live2D 展示位的第一个角色生成个性化提醒。",
+        ), pomodoro_panel))
+        pomodoro_command_hint.setObjectName("reminderHint")
+        pomodoro_layout.addWidget(pomodoro_command_hint)
 
         pomo_form = QGridLayout()
         pomo_form.setHorizontalSpacing(10)
@@ -226,6 +238,28 @@ class ReminderPageMixin:
         self._fill_reminder_character_combo(self._pomodoro_character_combo)
         self._on_alarm_repeat_changed()
         self._refresh_reminder_lists()
+
+    def apply_remote_settings(self, data: dict):
+        """Reflect reminder changes pushed from other processes (e.g. chat @clock / @pomodoro)."""
+        if not isinstance(data, dict) or not self._cfg:
+            return
+        reminder_keys = (ALARM_CONFIG_KEY, POMODORO_CONFIG_KEY, REMINDER_DISPLAY_MODE_KEY)
+        if not any(key in data for key in reminder_keys):
+            return
+        if ALARM_CONFIG_KEY in data:
+            self._cfg.set(ALARM_CONFIG_KEY, normalize_alarms(data.get(ALARM_CONFIG_KEY, [])))
+        if POMODORO_CONFIG_KEY in data:
+            self._cfg.set(POMODORO_CONFIG_KEY, normalize_pomodoros(data.get(POMODORO_CONFIG_KEY, [])))
+        if REMINDER_DISPLAY_MODE_KEY in data:
+            mode = normalize_display_mode(data.get(REMINDER_DISPLAY_MODE_KEY, DISPLAY_MODE_FLOATING))
+            self._cfg.set(REMINDER_DISPLAY_MODE_KEY, mode)
+            if hasattr(self, "_reminder_display_mode"):
+                for index in range(self._reminder_display_mode.count()):
+                    if self._reminder_display_mode.itemData(index) == mode:
+                        self._reminder_display_mode.setCurrentIndex(index)
+                        break
+        if hasattr(self, "_alarm_list_layout"):
+            self._refresh_reminder_lists()
 
     def _reminder_settings_data(self) -> dict:
         if not self._cfg:

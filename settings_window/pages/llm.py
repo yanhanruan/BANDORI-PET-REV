@@ -232,6 +232,18 @@ class LLMPageMixin:
             "SettingsWindow.llm_chat_commands_hint",
             default="@stop / @停止 / @中断：强制中断当前模型输出。好感度、记忆和关系数值命令在\u201c好感度 / 记忆\u201d页说明。",
         ), page)))
+        layout.addWidget(_wrap_label(BodyLabel(_tr(
+            "SettingsWindow.llm_chat_commands_cot",
+            default="@cot [开/关]：快速开启或关闭思维链显示；省略参数则切换当前状态。",
+        ), page)))
+        layout.addWidget(_wrap_label(BodyLabel(_tr(
+            "SettingsWindow.llm_chat_commands_websearch",
+            default="@websearch [开/关]：快速开启或关闭联网搜索；省略参数则切换当前状态。",
+        ), page)))
+        layout.addWidget(_wrap_label(BodyLabel(_tr(
+            "SettingsWindow.llm_chat_commands_sys_instruction",
+            default="@sys-instruction [开/关]：开启或关闭最高优先级系统提示词预设；省略参数则切换当前状态。",
+        ), page)))
 
         custom_system_row = QHBoxLayout()
         custom_system_row.setContentsMargins(0, 0, 0, 0)
