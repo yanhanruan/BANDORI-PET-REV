@@ -40,9 +40,13 @@ GWL_EXSTYLE = -20
 GWLP_WNDPROC = -4
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_LAYERED = 0x00080000
+WS_EX_TOPMOST = 0x00000008
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
 WS_EX_NOACTIVATE = 0x08000000
+WS_POPUP = 0x80000000
+SW_HIDE = 0
+SW_SHOWNA = 8
 LWA_ALPHA = 0x00000002
 ULW_ALPHA = 0x00000002
 AC_SRC_OVER = 0x00
@@ -50,7 +54,13 @@ AC_SRC_ALPHA = 0x01
 BI_RGB = 0
 DIB_RGB_COLORS = 0
 WM_NCHITTEST = 0x0084
+WM_MOUSEMOVE = 0x0200
+WM_LBUTTONDOWN = 0x0201
+WM_LBUTTONUP = 0x0202
+WM_RBUTTONDOWN = 0x0204
+WM_RBUTTONUP = 0x0205
 HTTRANSPARENT = -1
+HTCLIENT = 1
 HWND_TOPMOST = -1
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
@@ -67,9 +77,14 @@ if os.name == "nt":
     _set_window_long = _user32.SetWindowLongPtrW
     _set_window_pos = _user32.SetWindowPos
     _set_layered_window_attributes = _user32.SetLayeredWindowAttributes
+    _create_window_ex = _user32.CreateWindowExW
+    _destroy_window = _user32.DestroyWindow
+    _show_window = _user32.ShowWindow
     _update_layered_window = _user32.UpdateLayeredWindow
     _get_dc = _user32.GetDC
     _release_dc = _user32.ReleaseDC
+    _set_capture = _user32.SetCapture
+    _release_capture = _user32.ReleaseCapture
     _call_window_proc = _user32.CallWindowProcW
     _def_window_proc = _user32.DefWindowProcW
     _get_cursor_pos = _user32.GetCursorPos
@@ -150,6 +165,25 @@ if os.name == "nt":
     _get_window_long.restype = ctypes.c_ssize_t
     _set_window_long.argtypes = [ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
     _set_window_long.restype = ctypes.c_ssize_t
+    _create_window_ex.argtypes = [
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.HMENU,
+        ctypes.wintypes.HINSTANCE,
+        ctypes.c_void_p,
+    ]
+    _create_window_ex.restype = ctypes.wintypes.HWND
+    _destroy_window.argtypes = [ctypes.wintypes.HWND]
+    _destroy_window.restype = ctypes.wintypes.BOOL
+    _show_window.argtypes = [ctypes.wintypes.HWND, ctypes.c_int]
+    _show_window.restype = ctypes.wintypes.BOOL
     _update_layered_window.argtypes = [
         ctypes.wintypes.HWND,
         ctypes.wintypes.HDC,
@@ -166,6 +200,10 @@ if os.name == "nt":
     _get_dc.restype = ctypes.wintypes.HDC
     _release_dc.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.HDC]
     _release_dc.restype = ctypes.c_int
+    _set_capture.argtypes = [ctypes.wintypes.HWND]
+    _set_capture.restype = ctypes.wintypes.HWND
+    _release_capture.argtypes = []
+    _release_capture.restype = ctypes.wintypes.BOOL
     _create_compatible_dc.argtypes = [ctypes.wintypes.HDC]
     _create_compatible_dc.restype = ctypes.wintypes.HDC
     _create_dib_section.argtypes = [
@@ -207,9 +245,14 @@ else:
     _set_window_long = None
     _set_window_pos = None
     _set_layered_window_attributes = None
+    _create_window_ex = None
+    _destroy_window = None
+    _show_window = None
     _update_layered_window = None
     _get_dc = None
     _release_dc = None
+    _set_capture = None
+    _release_capture = None
     _call_window_proc = None
     _def_window_proc = None
     _get_cursor_pos = None
@@ -471,12 +514,53 @@ class Live2DGlRenderer:
         self.default_motion_group = ""
         self.default_expression = ""
         self._motion_was_finished = True
+        self.use_offscreen = False
+        self._fbo = 0
+        self._fbo_texture = 0
 
     def init_gl(self):
         self.live2d.glInit()
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glDisable(gl.GL_DITHER)
         gl.glViewport(0, 0, self.width, self.height)
+        if self.use_offscreen:
+            try:
+                self._init_offscreen_framebuffer()
+            except Exception as exc:
+                print(f"Win11 offscreen renderer disabled: {exc}", file=sys.stderr)
+                self._dispose_offscreen_framebuffer()
+                self.use_offscreen = False
+
+    def _init_offscreen_framebuffer(self):
+        self._fbo = int(gl.glGenFramebuffers(1))
+        self._fbo_texture = int(gl.glGenTextures(1))
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._fbo_texture)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexImage2D(
+            gl.GL_TEXTURE_2D,
+            0,
+            gl.GL_RGBA,
+            self.width,
+            self.height,
+            0,
+            gl.GL_RGBA,
+            gl.GL_UNSIGNED_BYTE,
+            None,
+        )
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._fbo)
+        gl.glFramebufferTexture2D(
+            gl.GL_FRAMEBUFFER,
+            gl.GL_COLOR_ATTACHMENT0,
+            gl.GL_TEXTURE_2D,
+            self._fbo_texture,
+            0,
+        )
+        if gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
+            raise RuntimeError("Win11 layered renderer framebuffer is incomplete")
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
 
     def load_model(self, model_json_path: str):
         from zst_model_archive import clear_virtual_byte_cache, is_virtual_path, prefetch_virtual_model_resources
@@ -562,6 +646,8 @@ class Live2DGlRenderer:
             self.model.Resize(self.width, self.height)
 
     def draw(self):
+        if self._fbo:
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._fbo)
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendEquationSeparate(gl.GL_FUNC_ADD, gl.GL_FUNC_ADD)
         gl.glBlendFuncSeparate(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
@@ -572,6 +658,24 @@ class Live2DGlRenderer:
         self._ensure_default_motion()
         self._apply_lip_sync()
         self.model.Draw()
+
+    def bind_read_target(self):
+        if self._fbo:
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._fbo)
+
+    def _dispose_offscreen_framebuffer(self):
+        if self._fbo_texture:
+            try:
+                gl.glDeleteTextures([self._fbo_texture])
+            except Exception:
+                pass
+        if self._fbo:
+            try:
+                gl.glDeleteFramebuffers(1, [self._fbo])
+            except Exception:
+                pass
+        self._fbo_texture = 0
+        self._fbo = 0
 
     def _default_motion_group(self) -> str:
         if self.model is None or self.model.modelSetting is None:
@@ -625,6 +729,7 @@ class Live2DGlRenderer:
     def hit_at(self, x: float, y: float) -> bool:
         if self.model is None or not (0 <= x < self.width and 0 <= y < self.height):
             return False
+        self.bind_read_target()
         pixel = (ctypes.c_ubyte * 4)()
         gl.glReadPixels(int(x), int(self.height - 1 - y), 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, pixel)
         return int(pixel[3]) > self.hit_threshold
@@ -739,6 +844,7 @@ class Live2DGlRenderer:
             return ""
 
     def dispose(self):
+        self._dispose_offscreen_framebuffer()
         self.live2d.dispose()
 
 
@@ -865,6 +971,9 @@ class LightweightPet:
         self._original_wndproc = 0
         self._wndproc = None
         self.layered_blit = os.name == "nt" and is_windows_11_or_later()
+        self.layered_hwnd = 0
+        self._layered_wndproc = None
+        self._layered_original_wndproc = 0
         self._layered_screen_dc = None
         self._layered_mem_dc = None
         self._layered_bitmap = None
@@ -890,6 +999,7 @@ class LightweightPet:
             _clamp_int(self.config.get("live2d_hit_alpha_threshold", DEFAULT_HIT_ALPHA_THRESHOLD), 0, 255, DEFAULT_HIT_ALPHA_THRESHOLD),
             _clamp_float(self.config.get("live2d_lip_sync_max_open", DEFAULT_LIP_SYNC_MAX_OPEN), 0.0, 1.0, DEFAULT_LIP_SYNC_MAX_OPEN),
         )
+        self.renderer.use_offscreen = self.layered_blit
         self.renderer.default_expression = str(self.entry.get("default_expression", "")).strip()
         self.radial = RadialMenuClient(self._on_radial_action, self._on_lock_toggled)
         self.shared_events = SharedEventReader()
@@ -908,12 +1018,19 @@ class LightweightPet:
             return 3
         try:
             self._create_window()
+            self.renderer.use_offscreen = self.layered_blit
             glfw.make_context_current(self.window)
             glfw.swap_interval(1 if self.vsync else 0)
             self.renderer.init_gl()
+            if self.layered_blit and not self.renderer.use_offscreen:
+                self.layered_blit = False
+                self._dispose_windows_layered_blit()
             self.renderer.load_model(self.model_path)
             if not self.hide:
-                glfw.show_window(self.window)
+                if self.layered_blit:
+                    self._show_windows_layered_blit(True)
+                else:
+                    glfw.show_window(self.window)
                 if os.name == "nt" and not self.layered_blit:
                     self._enable_windows_framebuffer_transparency()
                 self._set_mouse_passthrough(True)
@@ -1108,10 +1225,7 @@ class LightweightPet:
         style = _get_window_long(self.hwnd, GWL_EXSTYLE)
         style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
         style &= ~WS_EX_APPWINDOW
-        if self.layered_blit:
-            style |= WS_EX_LAYERED
-        else:
-            style &= ~WS_EX_LAYERED
+        style &= ~WS_EX_LAYERED
         _set_window_long(self.hwnd, GWL_EXSTYLE, style)
         self._install_windows_hit_test_hook()
         _set_window_pos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED)
@@ -1149,10 +1263,35 @@ class LightweightPet:
             or _get_dc is None
             or _create_compatible_dc is None
             or _create_dib_section is None
+            or _create_window_ex is None
         ):
             self.layered_blit = False
             return
         try:
+            ex_style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+            self.layered_hwnd = int(_create_window_ex(
+                ex_style,
+                "Static",
+                f"BandoriPetLayered-{self.character}",
+                WS_POPUP,
+                int(self.x),
+                int(self.y),
+                int(self.width),
+                int(self.height),
+                None,
+                None,
+                None,
+                None,
+            ))
+            if not self.layered_hwnd:
+                raise OSError("failed to create layered overlay window")
+            if _WNDPROC is not None:
+                self._layered_wndproc = _WNDPROC(self._layered_native_wndproc)
+                proc_ptr = ctypes.cast(self._layered_wndproc, ctypes.c_void_p).value
+                previous = _set_window_long(self.layered_hwnd, GWLP_WNDPROC, int(proc_ptr))
+                if previous:
+                    self._layered_original_wndproc = int(previous)
+
             self._layered_screen_dc = _get_dc(None)
             self._layered_mem_dc = _create_compatible_dc(self._layered_screen_dc)
             if not self._layered_screen_dc or not self._layered_mem_dc:
@@ -1195,8 +1334,9 @@ class LightweightPet:
             self._enable_windows_framebuffer_transparency()
 
     def _present_windows_layered_blit(self):
-        if not self.layered_blit or not self._layered_bits_addr or _update_layered_window is None:
+        if not self.layered_blit or not self.layered_hwnd or not self._layered_bits_addr or _update_layered_window is None:
             return
+        self.renderer.bind_read_target()
         gl.glReadPixels(
             0,
             0,
@@ -1229,7 +1369,7 @@ class LightweightPet:
         src_pos = _POINT(0, 0)
         blend = _BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
         _update_layered_window(
-            self.hwnd,
+            self.layered_hwnd,
             self._layered_screen_dc,
             ctypes.byref(dst_pos),
             ctypes.byref(size),
@@ -1240,9 +1380,19 @@ class LightweightPet:
             ULW_ALPHA,
         )
 
+    def _show_windows_layered_blit(self, visible: bool):
+        if not self.layered_blit or not self.layered_hwnd or _show_window is None:
+            return
+        _show_window(self.layered_hwnd, SW_SHOWNA if visible else SW_HIDE)
+
     def _dispose_windows_layered_blit(self):
         if os.name != "nt":
             return
+        if self.layered_hwnd and self._layered_original_wndproc and _set_window_long is not None:
+            try:
+                _set_window_long(self.layered_hwnd, GWLP_WNDPROC, self._layered_original_wndproc)
+            except Exception:
+                pass
         if self._layered_mem_dc and self._layered_old_bitmap and _select_object is not None:
             try:
                 _select_object(self._layered_mem_dc, self._layered_old_bitmap)
@@ -1263,6 +1413,14 @@ class LightweightPet:
                 _release_dc(None, self._layered_screen_dc)
             except Exception:
                 pass
+        if self.layered_hwnd and _destroy_window is not None:
+            try:
+                _destroy_window(self.layered_hwnd)
+            except Exception:
+                pass
+        self.layered_hwnd = 0
+        self._layered_wndproc = None
+        self._layered_original_wndproc = 0
         self._layered_screen_dc = None
         self._layered_mem_dc = None
         self._layered_bitmap = None
@@ -1458,8 +1616,82 @@ class LightweightPet:
             pass
         return self._call_original_wndproc(hwnd, msg, wparam, lparam)
 
+    def _call_layered_wndproc(self, hwnd, msg, wparam, lparam):
+        if self._layered_original_wndproc and _call_window_proc is not None:
+            return _call_window_proc(self._layered_original_wndproc, hwnd, msg, wparam, lparam)
+        if _def_window_proc is not None:
+            return _def_window_proc(hwnd, msg, wparam, lparam)
+        return 0
+
+    def _layered_native_wndproc(self, hwnd, msg, wparam, lparam):
+        try:
+            if msg == WM_NCHITTEST and self.window is not None and not self.dragging:
+                raw = int(lparam) & 0xffffffff
+                gx = self._signed_word(raw)
+                gy = self._signed_word(raw >> 16)
+                wx, wy = glfw.get_window_pos(self.window)
+                if wx <= gx < wx + self.width and wy <= gy < wy + self.height:
+                    return HTCLIENT if self.renderer.hit_at(gx - wx, gy - wy) else HTTRANSPARENT
+            if msg in (WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN):
+                self._handle_layered_mouse_message(msg, lparam)
+                return 0
+        except Exception:
+            pass
+        return self._call_layered_wndproc(hwnd, msg, wparam, lparam)
+
+    def _handle_layered_mouse_message(self, msg, lparam):
+        raw = int(lparam) & 0xffffffff
+        x = self._signed_word(raw)
+        y = self._signed_word(raw >> 16)
+        wx, wy = glfw.get_window_pos(self.window)
+        gx, gy = wx + x, wy + y
+        if msg == WM_RBUTTONDOWN:
+            if self.renderer.hit_at(x, y):
+                self._show_radial_menu(gx, gy)
+            return
+        if msg == WM_LBUTTONDOWN:
+            self.pressed_on_model = self.renderer.hit_at(x, y)
+            if self.pressed_on_model and not self.drag_locked:
+                self.dragging = True
+                self.drag_moved = False
+                self.drag_start = (gx, gy)
+                self.drag_origin = (gx, gy)
+                self._set_mouse_passthrough(False)
+                if self.layered_hwnd and _set_capture is not None:
+                    _set_capture(self.layered_hwnd)
+            return
+        if msg == WM_LBUTTONUP:
+            should_click = self.pressed_on_model and not self.drag_moved and self.renderer.hit_at(x, y)
+            self.dragging = False
+            self.pressed_on_model = False
+            if _release_capture is not None:
+                _release_capture()
+            if should_click:
+                self._on_click(x, y)
+            return
+        if msg == WM_MOUSEMOVE:
+            self._drag_to_global_pos(gx, gy)
+
     def _set_mouse_passthrough(self, enabled: bool):
         if enabled == self.mouse_passthrough:
+            return
+        if self.layered_blit and self.layered_hwnd:
+            style = _get_window_long(self.layered_hwnd, GWL_EXSTYLE)
+            if enabled:
+                style |= WS_EX_TRANSPARENT
+            else:
+                style &= ~WS_EX_TRANSPARENT
+            _set_window_long(self.layered_hwnd, GWL_EXSTYLE, style)
+            _set_window_pos(
+                self.layered_hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            self.mouse_passthrough = enabled
             return
         if self.mouse_passthrough_supported and self.window is not None:
             try:
@@ -1544,6 +1776,11 @@ class LightweightPet:
         if not self.dragging or self.drag_locked:
             return
         gx, gy = self._global_cursor_pos()
+        self._drag_to_global_pos(gx, gy)
+
+    def _drag_to_global_pos(self, gx: int, gy: int):
+        if not self.dragging or self.drag_locked:
+            return
         if not self.drag_moved:
             dx0 = gx - self.drag_origin[0]
             dy0 = gy - self.drag_origin[1]
@@ -1554,9 +1791,22 @@ class LightweightPet:
         dy = int(gy - self.drag_start[1])
         if dx or dy:
             wx, wy = glfw.get_window_pos(self.window)
-            glfw.set_window_pos(self.window, wx + dx, wy + dy)
+            self._set_pet_window_pos(wx + dx, wy + dy)
             self.drag_start = (gx, gy)
             self.last_save = time.monotonic()
+
+    def _set_pet_window_pos(self, x: int, y: int):
+        glfw.set_window_pos(self.window, int(x), int(y))
+        if self.layered_blit and self.layered_hwnd:
+            _set_window_pos(
+                self.layered_hwnd,
+                HWND_TOPMOST,
+                int(x),
+                int(y),
+                int(self.width),
+                int(self.height),
+                SWP_NOACTIVATE,
+            )
 
     def _poll_head_tracking(self):
         if self.dragging or self.renderer.model is None:
