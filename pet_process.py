@@ -1016,7 +1016,8 @@ class LightweightPet:
         self._enable_windows_framebuffer_transparency()
 
     def _enable_windows_framebuffer_transparency(self):
-        if _dwm_extend_frame_into_client_area is not None and _MARGINS is not None and is_windows_11_or_later():
+        is_win11 = is_windows_11_or_later()
+        if _dwm_extend_frame_into_client_area is not None and _MARGINS is not None and is_win11:
             margins = _MARGINS(-1, -1, -1, -1)
             try:
                 _dwm_extend_frame_into_client_area(self.hwnd, ctypes.byref(margins))
@@ -1029,7 +1030,18 @@ class LightweightPet:
         blur.fEnable = True
         blur.hRgnBlur = None
         blur.fTransitionOnMaximized = False
-        _dwm_enable_blur_behind_window(self.hwnd, ctypes.byref(blur))
+        blur_region = None
+        if is_win11 and _create_rect_rgn is not None:
+            # Windows 11 can otherwise composite transparent OpenGL framebuffers as black.
+            blur_region = _create_rect_rgn(0, 0, -1, -1)
+            if blur_region:
+                blur.dwFlags |= DWM_BB_BLURREGION
+                blur.hRgnBlur = blur_region
+        try:
+            _dwm_enable_blur_behind_window(self.hwnd, ctypes.byref(blur))
+        finally:
+            if blur_region and _delete_object is not None:
+                _delete_object(blur_region)
 
     def _install_windows_hit_test_hook(self):
         if os.name != "nt" or not self.hwnd or _WNDPROC is None or self._original_wndproc:
