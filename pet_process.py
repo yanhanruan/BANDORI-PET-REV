@@ -19,6 +19,7 @@ import OpenGL.GL as gl
 
 from process_utils import app_base_dir, configure_debug_logging, process_program_and_args, set_windows_app_user_model_id
 from shared_event_ipc import SharedEventReader, SharedEventWriter
+from win32_dwm import is_windows_11_or_later
 
 configure_debug_logging()
 
@@ -71,13 +72,25 @@ if os.name == "nt":
             ("fTransitionOnMaximized", ctypes.wintypes.BOOL),
         ]
 
+    class _MARGINS(ctypes.Structure):
+        _fields_ = [
+            ("cxLeftWidth", ctypes.c_int),
+            ("cxRightWidth", ctypes.c_int),
+            ("cyTopHeight", ctypes.c_int),
+            ("cyBottomHeight", ctypes.c_int),
+        ]
+
     try:
         _dwmapi = ctypes.windll.dwmapi
         _dwm_enable_blur_behind_window = _dwmapi.DwmEnableBlurBehindWindow
         _dwm_enable_blur_behind_window.argtypes = [ctypes.wintypes.HWND, ctypes.POINTER(_DWM_BLURBEHIND)]
         _dwm_enable_blur_behind_window.restype = ctypes.c_long
+        _dwm_extend_frame_into_client_area = _dwmapi.DwmExtendFrameIntoClientArea
+        _dwm_extend_frame_into_client_area.argtypes = [ctypes.wintypes.HWND, ctypes.POINTER(_MARGINS)]
+        _dwm_extend_frame_into_client_area.restype = ctypes.c_long
     except (AttributeError, OSError):
         _dwm_enable_blur_behind_window = None
+        _dwm_extend_frame_into_client_area = None
     _WNDPROC = ctypes.WINFUNCTYPE(
         ctypes.c_ssize_t,
         ctypes.wintypes.HWND,
@@ -121,7 +134,9 @@ else:
     _create_rect_rgn = None
     _delete_object = None
     _dwm_enable_blur_behind_window = None
+    _dwm_extend_frame_into_client_area = None
     _DWM_BLURBEHIND = None
+    _MARGINS = None
     _WNDPROC = None
 
 _x11 = None
@@ -990,6 +1005,13 @@ class LightweightPet:
         self._enable_windows_framebuffer_transparency()
 
     def _enable_windows_framebuffer_transparency(self):
+        if _dwm_extend_frame_into_client_area is not None and _MARGINS is not None and is_windows_11_or_later():
+            margins = _MARGINS(-1, -1, -1, -1)
+            try:
+                if _dwm_extend_frame_into_client_area(self.hwnd, ctypes.byref(margins)) == 0:
+                    return
+            except Exception:
+                pass
         if _dwm_enable_blur_behind_window is None or _DWM_BLURBEHIND is None:
             return
         blur = _DWM_BLURBEHIND()
