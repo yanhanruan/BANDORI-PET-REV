@@ -48,6 +48,9 @@ WM_NCHITTEST = 0x0084
 HTTRANSPARENT = -1
 HTCLIENT = 1
 HWND_TOPMOST = -1
+VK_LBUTTON = 0x01
+VK_RBUTTON = 0x02
+VK_MBUTTON = 0x04
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
@@ -55,6 +58,9 @@ SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
 DWM_BB_ENABLE = 0x00000001
 DWM_BB_BLURREGION = 0x00000002
+VK_LBUTTON = 0x01
+VK_RBUTTON = 0x02
+VK_MBUTTON = 0x04
 
 if os.name == "nt":
     _user32 = ctypes.windll.user32
@@ -63,6 +69,7 @@ if os.name == "nt":
     _set_window_long = _user32.SetWindowLongPtrW
     _set_window_pos = _user32.SetWindowPos
     _get_cursor_pos = _user32.GetCursorPos
+    _get_async_key_state = _user32.GetAsyncKeyState
     _call_window_proc = _user32.CallWindowProcW
     _def_window_proc = _user32.DefWindowProcW
     _create_rect_rgn = _gdi32.CreateRectRgn
@@ -106,6 +113,8 @@ if os.name == "nt":
     _set_window_pos.restype = ctypes.wintypes.BOOL
     _get_cursor_pos.argtypes = [ctypes.POINTER(ctypes.wintypes.POINT)]
     _get_cursor_pos.restype = ctypes.wintypes.BOOL
+    _get_async_key_state.argtypes = [ctypes.c_int]
+    _get_async_key_state.restype = ctypes.c_short
     _create_rect_rgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     _create_rect_rgn.restype = ctypes.wintypes.HANDLE
     _delete_object.argtypes = [ctypes.wintypes.HANDLE]
@@ -132,6 +141,7 @@ else:
     _set_window_long = None
     _set_window_pos = None
     _get_cursor_pos = None
+    _get_async_key_state = None
     _call_window_proc = None
     _def_window_proc = None
     _create_rect_rgn = None
@@ -802,6 +812,7 @@ class LightweightPet:
         self._last_peer_pos_send = 0.0
         self._PEER_POS_INTERVAL = 0.5
         self._PEER_POS_TTL = 2.0
+        self._radial_mouse_pressed = False
 
     def run(self) -> int:
         if not self.model_path:
@@ -1384,9 +1395,6 @@ class LightweightPet:
     def _update_mouse_passthrough(self):
         if self.dragging:
             return
-        if self.radial.visible:
-            self._set_mouse_passthrough(True)
-            return
         gx, gy = self._global_cursor_pos()
         wx, wy = glfw.get_window_pos(self.window)
         inside = wx <= gx < wx + self.width and wy <= gy < wy + self.height
@@ -1394,6 +1402,8 @@ class LightweightPet:
             if self._last_passthrough_cursor is not None:
                 self._last_passthrough_cursor = None
             self._set_mouse_passthrough(True)
+            if self.radial.visible:
+                self._check_radial_dismiss_click()
             return
         lx, ly = gx - wx, gy - wy
         if self._last_passthrough_cursor == (lx, ly):
@@ -1404,6 +1414,25 @@ class LightweightPet:
             self._set_mouse_passthrough(False)
         else:
             self._set_mouse_passthrough(not self.renderer.hit_at(lx, ly))
+        if self.radial.visible:
+            self._check_radial_dismiss_click()
+
+    def _check_radial_dismiss_click(self):
+        gx, gy = self._global_cursor_pos()
+        wx, wy = glfw.get_window_pos(self.window)
+        inside_pet = wx <= gx < wx + self.width and wy <= gy < wy + self.height
+        if not inside_pet:
+            self._radial_mouse_pressed = False
+            return
+        pressed = False
+        if _get_async_key_state is not None:
+            pressed = any(
+                bool(_get_async_key_state(button) & 0x8000)
+                for button in (VK_LBUTTON, VK_MBUTTON)
+            )
+        if pressed and not self._radial_mouse_pressed:
+            self.radial.send("CLOSE")
+        self._radial_mouse_pressed = pressed
 
     def _on_click(self, x: float, y: float):
         if self.radial.visible:
