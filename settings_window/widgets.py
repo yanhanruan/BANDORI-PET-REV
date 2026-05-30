@@ -1,6 +1,7 @@
 import sys
 
 import OpenGL.GL as gl
+from PySide6.QtGui import QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from settings_window.constants import *
@@ -73,6 +74,10 @@ class Live2DPreviewRenderWidget(QOpenGLWidget):
             self._load_model(model_json_path)
             self.update()
 
+    def render_once(self):
+        self._static_render_done = False
+        self.update()
+
     def _load_model(self, model_json_path: str):
         from live2d_quality import LIVE2D_QUALITY_PROFILES
         from platform_patch import set_live2d_texture_quality
@@ -80,7 +85,9 @@ class Live2DPreviewRenderWidget(QOpenGLWidget):
 
         if not model_json_path or not self._live2d:
             return
-        self.makeCurrent()
+        already_current = QOpenGLContext.currentContext() == self.context()
+        if not already_current:
+            self.makeCurrent()
         try:
             virtual = is_virtual_path(model_json_path)
             if virtual:
@@ -102,7 +109,8 @@ class Live2DPreviewRenderWidget(QOpenGLWidget):
             self._model = None
             self._model_path = ""
         finally:
-            self.doneCurrent()
+            if not already_current:
+                self.doneCurrent()
 
     def initializeGL(self):
         if self._live2d:
@@ -999,6 +1007,8 @@ class Live2DPreviewBubble(QWidget):
             self.show()
             self._apply_windows_frame_fix()
         self.raise_()
+        self._live2d_widget.render_once()
+        QTimer.singleShot(0, self._live2d_widget.render_once)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
