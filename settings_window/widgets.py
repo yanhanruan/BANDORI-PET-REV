@@ -1,6 +1,6 @@
 import sys
 
-from PySide6.QtGui import QOpenGLContext
+from PySide6.QtGui import QAction, QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from qt_gl import gl
