@@ -129,6 +129,7 @@ DEFAULTS = {
     "opacity": 1.0,
     "dark_theme": "follow_system",
     "vsync": True,
+    "gpu_acceleration": True,
     "game_topmost": False,
     "hide_live2d_model": False,
     "live2d_idle_actions_enabled": True,

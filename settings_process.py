@@ -4,8 +4,10 @@ import os
 import sys
 
 from process_utils import app_base_dir, configure_debug_logging, install_parent_death_watch, ipc_server_name, set_windows_app_user_model_id
+from gpu_acceleration import configure_qt_opengl_environment
 
 configure_debug_logging()
+configure_qt_opengl_environment()
 
 BASE_DIR = str(app_base_dir())
 
@@ -20,6 +22,7 @@ from model_manager import ModelManager
 from settings_window import SettingsWindow
 from app_theme import apply_app_theme
 from live2d_widget import Live2DWidget
+from gpu_acceleration import configure_qt_gpu_acceleration
 
 
 def _parse_args():
@@ -48,9 +51,7 @@ def main():
     cfg = ConfigManager()
     set_language(cfg.get("language", "") or detect_system_language())
 
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-    if sys.platform != "darwin":
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    configure_qt_gpu_acceleration(QApplication, Qt, cfg)
     Live2DWidget.configure_default_surface_format()
 
     set_windows_app_user_model_id("BandoriPet.Settings")

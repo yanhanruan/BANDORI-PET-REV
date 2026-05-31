@@ -13,8 +13,10 @@ from process_utils import (
     process_program_and_args,
     set_windows_app_user_model_id,
 )
+from gpu_acceleration import configure_qt_opengl_environment
 
 configure_debug_logging()
+configure_qt_opengl_environment()
 BASE_DIR = str(app_base_dir())
 APP_AUMID = "BandoriPet"
 
@@ -35,6 +37,7 @@ from onebot_message import onebot_event_mentions_self
 from database_manager import DatabaseManager
 from tray_utils import keep_tray_icon_visible, load_tray_icon
 from alarm_manager import ReminderScheduler
+from gpu_acceleration import configure_qt_gpu_acceleration
 
 
 class AiEventBridge(QObject):
@@ -62,9 +65,7 @@ def main():
         lang = detect_system_language()
     set_language(lang)
 
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-    if sys.platform != "darwin":
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    configure_qt_gpu_acceleration(QApplication, Qt, cfg)
     Live2DWidget.configure_default_surface_format()
     icon_path = os.path.join(BASE_DIR, "logo.ico")
     ensure_windows_app_user_model_shortcut(APP_AUMID, "BandoriPet", icon_path)
@@ -684,6 +685,7 @@ def main():
             ("opacity", "opacity", 1.0),
             ("dark_theme", "dark", False),
             ("vsync", "vsync", True),
+            ("gpu_acceleration", "gpu_acceleration", True),
             ("game_topmost", "game_topmost", False),
             ("chat_window_normal_window", "chat_window_normal_window", False),
             ("hide_live2d_model", "hide_live2d_model", False),

@@ -532,6 +532,8 @@
   "SettingsWindow.quality_balanced": "バランス",
   "SettingsWindow.quality_detail_performance": "最近傍テクスチャフィルタを使用。内蔵GPU、リモートデスクトップ、複数キャラ同時実行に適しています。",
   "SettingsWindow.quality_detail_balanced": "リニアテクスチャフィルタを使用。鮮明さと滑らかさのバランスを取ります。",
+  "SettingsWindow.gpu_acceleration": "GPU アクセラレーション",
+  "SettingsWindow.gpu_acceleration_tip": "有効にすると Live2D はハードウェア OpenGL を優先します。無効にすると次回起動からソフトウェアレンダリングを使います。",
   "SettingsWindow.preview_failed_title": "プレビュー読み込み失敗",
   "SettingsWindow.preview_failed_content": "Live2D 衣装プレビューの初期化に失敗しました：{error}",
   "SettingsWindow.live2d_scale": "モデル拡大率（%）",
