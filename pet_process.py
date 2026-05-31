@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import glfw
@@ -38,12 +39,14 @@ DEFAULT_LIP_SYNC_MAX_OPEN = 0.55
 
 GWL_EXSTYLE = -20
 GWLP_WNDPROC = -4
+GWLP_HWNDPARENT = -8
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_LAYERED = 0x00080000
 WS_EX_NOREDIRECTIONBITMAP = 0x00200000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
 WS_EX_NOACTIVATE = 0x08000000
+WS_POPUP = 0x80000000
 WM_NCHITTEST = 0x0084
 HTTRANSPARENT = -1
 HTCLIENT = 1
@@ -56,6 +59,8 @@ SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
+SWP_SHOWWINDOW = 0x0040
+SW_SHOWNOACTIVATE = 4
 DWM_BB_ENABLE = 0x00000001
 DWM_BB_BLURREGION = 0x00000002
 VK_LBUTTON = 0x01
@@ -68,6 +73,11 @@ if os.name == "nt":
     _get_window_long = _user32.GetWindowLongPtrW
     _set_window_long = _user32.SetWindowLongPtrW
     _set_window_pos = _user32.SetWindowPos
+    _show_window_async = _user32.ShowWindowAsync
+    _get_foreground_window = _user32.GetForegroundWindow
+    _set_foreground_window = _user32.SetForegroundWindow
+    _create_window_ex = _user32.CreateWindowExW
+    _destroy_window = _user32.DestroyWindow
     _get_cursor_pos = _user32.GetCursorPos
     _get_async_key_state = _user32.GetAsyncKeyState
     _call_window_proc = _user32.CallWindowProcW
@@ -111,6 +121,29 @@ if os.name == "nt":
         ctypes.c_uint,
     ]
     _set_window_pos.restype = ctypes.wintypes.BOOL
+    _show_window_async.argtypes = [ctypes.wintypes.HWND, ctypes.c_int]
+    _show_window_async.restype = ctypes.wintypes.BOOL
+    _get_foreground_window.argtypes = []
+    _get_foreground_window.restype = ctypes.wintypes.HWND
+    _set_foreground_window.argtypes = [ctypes.wintypes.HWND]
+    _set_foreground_window.restype = ctypes.wintypes.BOOL
+    _create_window_ex.argtypes = [
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.HMENU,
+        ctypes.wintypes.HINSTANCE,
+        ctypes.wintypes.LPVOID,
+    ]
+    _create_window_ex.restype = ctypes.wintypes.HWND
+    _destroy_window.argtypes = [ctypes.wintypes.HWND]
+    _destroy_window.restype = ctypes.wintypes.BOOL
     _get_cursor_pos.argtypes = [ctypes.POINTER(ctypes.wintypes.POINT)]
     _get_cursor_pos.restype = ctypes.wintypes.BOOL
     _get_async_key_state.argtypes = [ctypes.c_int]
@@ -140,6 +173,11 @@ else:
     _get_window_long = None
     _set_window_long = None
     _set_window_pos = None
+    _show_window_async = None
+    _get_foreground_window = None
+    _set_foreground_window = None
+    _create_window_ex = None
+    _destroy_window = None
     _get_cursor_pos = None
     _get_async_key_state = None
     _call_window_proc = None
@@ -779,7 +817,11 @@ class LightweightPet:
         if self.x < 0 or self.y < 0:
             self.x, self.y = 100 + args.index * 36, 100
         self.window = None
+        self._double_buffered = True
         self.hwnd = 0
+        self._owner_hwnd = 0
+        self._taskbar_cleanup_until = 0.0
+        self._last_taskbar_cleanup = 0.0
         self.x11_display = None
         self.x11_root_window = 0
         self.x11_window = 0
@@ -838,23 +880,27 @@ class LightweightPet:
             self.renderer.init_gl()
             self.renderer.load_model(self.model_path)
             if not self.hide:
-                glfw.show_window(self.window)
+                self._show_window_no_activate()
                 if os.name == "nt":
                     self._enable_windows_framebuffer_transparency()
                 self._set_mouse_passthrough(True)
             frame_interval = 1.0 / self.fps
-            next_frame = time.monotonic()
+            next_frame = time.perf_counter()
             while not glfw.window_should_close(self.window):
                 glfw.poll_events()
                 self._poll_shared_events()
                 self._poll_head_tracking()
                 self._send_peer_pos()
                 self._update_mouse_passthrough()
+                self._maybe_remove_windows_taskbar_tab()
                 self._maybe_save_position()
-                now = time.monotonic()
+                now = time.perf_counter()
                 if now >= next_frame:
                     self.renderer.draw()
-                    glfw.swap_buffers(self.window)
+                    if self._double_buffered:
+                        glfw.swap_buffers(self.window)
+                    else:
+                        gl.glFlush()
                     next_frame += frame_interval
                     if now > next_frame:
                         next_frame = now + frame_interval
@@ -862,7 +908,7 @@ class LightweightPet:
                     remain = next_frame - now
                     if remain > 0.0015:
                         time.sleep(remain - 0.001)
-                    while time.monotonic() < next_frame:
+                    while time.perf_counter() < next_frame:
                         pass
         finally:
             if _win_timer_boosted:
@@ -876,6 +922,7 @@ class LightweightPet:
             self.renderer.dispose()
             if self.window is not None:
                 glfw.destroy_window(self.window)
+            self._destroy_windows_owner()
             glfw.terminate()
         return 0
 
@@ -1009,10 +1056,19 @@ class LightweightPet:
         return not target or target == self.character
 
     def _create_window(self):
+        glfw.default_window_hints()
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 2)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 1)
         glfw.window_hint(glfw.ALPHA_BITS, 8)
+        if hasattr(glfw, "DOUBLEBUFFER"):
+            self._double_buffered = bool(self.vsync)
+            # Transparent GLFW windows can still block in SwapBuffers through DWM
+            # when vsync is disabled. Single-buffered front rendering avoids that
+            # hidden present throttle and lets the app's own FPS limiter drive.
+            glfw.window_hint(glfw.DOUBLEBUFFER, glfw.TRUE if self._double_buffered else glfw.FALSE)
+        else:
+            self._double_buffered = True
         glfw.window_hint(glfw.DECORATED, glfw.FALSE)
         glfw.window_hint(glfw.FLOATING, glfw.TRUE)
         glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)
@@ -1030,13 +1086,131 @@ class LightweightPet:
         if os.name == "nt":
             set_windows_app_user_model_id("BandoriPet.PetRenderer")
             self.hwnd = int(glfw.get_win32_window(self.window))
+            self._ensure_windows_owner()
             self._apply_windows_window_style()
         elif sys.platform.startswith("linux"):
             self._init_x11_input_support()
 
+    def _show_window_no_activate(self):
+        if os.name == "nt" and self.hwnd:
+            foreground = _get_foreground_window() if _get_foreground_window is not None else 0
+            self._apply_windows_window_style()
+            if _show_window_async is not None:
+                _show_window_async(self.hwnd, SW_SHOWNOACTIVATE)
+            else:
+                _set_window_pos(
+                    self.hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+                )
+            self._apply_windows_window_style()
+            self._remove_windows_taskbar_tab()
+            self._taskbar_cleanup_until = time.monotonic() + 2.0
+            current = _get_foreground_window() if _get_foreground_window is not None else 0
+            if foreground and current == self.hwnd and _set_foreground_window is not None:
+                _set_foreground_window(foreground)
+            return
+        glfw.show_window(self.window)
+
+    def _ensure_windows_owner(self):
+        if os.name != "nt" or self._owner_hwnd or _create_window_ex is None:
+            return
+        owner = _create_window_ex(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            "STATIC",
+            "BandoriPetHiddenOwner",
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        )
+        self._owner_hwnd = int(owner or 0)
+
+    def _destroy_windows_owner(self):
+        if os.name == "nt" and self._owner_hwnd and _destroy_window is not None:
+            _destroy_window(self._owner_hwnd)
+        self._owner_hwnd = 0
+
+    def _remove_windows_taskbar_tab(self):
+        if os.name != "nt" or not self.hwnd:
+            return
+        try:
+            class _GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", ctypes.wintypes.DWORD),
+                    ("Data2", ctypes.wintypes.WORD),
+                    ("Data3", ctypes.wintypes.WORD),
+                    ("Data4", ctypes.c_ubyte * 8),
+                ]
+
+            def make_guid(value: str):
+                item = uuid.UUID(value)
+                return _GUID(
+                    item.time_low,
+                    item.time_mid,
+                    item.time_hi_version,
+                    (ctypes.c_ubyte * 8).from_buffer_copy(item.bytes[8:]),
+                )
+
+            ole32 = ctypes.oledll.ole32
+            ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+            ole32.CoInitialize.restype = ctypes.c_long
+            ole32.CoCreateInstance.argtypes = [
+                ctypes.POINTER(_GUID),
+                ctypes.c_void_p,
+                ctypes.wintypes.DWORD,
+                ctypes.POINTER(_GUID),
+                ctypes.POINTER(ctypes.c_void_p),
+            ]
+            ole32.CoCreateInstance.restype = ctypes.c_long
+            clsid_taskbar = make_guid("56FDF344-FD6D-11d0-958A-006097C9A090")
+            iid_taskbar = make_guid("56FDF342-FD6D-11d0-958A-006097C9A090")
+            taskbar = ctypes.c_void_p()
+            ole32.CoInitialize(None)
+            hr = ole32.CoCreateInstance(
+                ctypes.byref(clsid_taskbar),
+                None,
+                1,
+                ctypes.byref(iid_taskbar),
+                ctypes.byref(taskbar),
+            )
+            if hr < 0 or not taskbar.value:
+                return
+            vtable = ctypes.cast(taskbar, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+            hr_init = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(vtable[3])
+            delete_tab = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.wintypes.HWND)(vtable[5])
+            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
+            try:
+                hr_init(taskbar.value)
+                delete_tab(taskbar.value, self.hwnd)
+            finally:
+                release(taskbar.value)
+        except Exception:
+            pass
+
+    def _maybe_remove_windows_taskbar_tab(self):
+        if os.name != "nt" or not self.hwnd:
+            return
+        now = time.monotonic()
+        if now > self._taskbar_cleanup_until or now - self._last_taskbar_cleanup < 0.2:
+            return
+        self._last_taskbar_cleanup = now
+        self._remove_windows_taskbar_tab()
+
     def _apply_windows_window_style(self):
         if not self.hwnd:
             return
+        if self._owner_hwnd:
+            _set_window_long(self.hwnd, GWLP_HWNDPARENT, self._owner_hwnd)
         style = _get_window_long(self.hwnd, GWL_EXSTYLE)
         style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
         style &= ~WS_EX_APPWINDOW
@@ -1046,6 +1220,7 @@ class LightweightPet:
         _set_window_long(self.hwnd, GWL_EXSTYLE, style)
         self._install_windows_hit_test_hook()
         _set_window_pos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        self._remove_windows_taskbar_tab()
         self._enable_windows_framebuffer_transparency()
 
     def _enable_windows_framebuffer_transparency(self):
