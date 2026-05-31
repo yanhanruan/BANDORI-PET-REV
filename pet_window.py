@@ -2202,15 +2202,30 @@ class PetWindow(QWidget):
     def _on_chat_process_finished(self, process: QProcess):
         if self._chat_process is process:
             self._chat_process = None
-        process.deleteLater()
+        try:
+            process.deleteLater()
+        except RuntimeError:
+            pass
 
     def _close_chat_process(self):
         if self._chat_process is None:
             return
-        if self._chat_process.state() != QProcess.ProcessState.NotRunning:
-            self._chat_process.terminate()
-            if not self._chat_process.waitForFinished(1000):
-                self._chat_process.kill()
+        p = self._chat_process
+        try:
+            p.finished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            p.errorOccurred.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        if p.state() != QProcess.ProcessState.NotRunning:
+            p.terminate()
+            if not p.waitForFinished(1000):
+                p.kill()
+                p.waitForFinished(1000)
+        p.setParent(None)
+        p.deleteLater()
         self._chat_process = None
 
     def _close_compact_ai_window(self):
