@@ -101,7 +101,7 @@ class TTSPageMixin:
             "SettingsWindow.tts_test_text_placeholder",
             default="留空则使用默认测试文案。",
         ))
-        self._tts_test_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        _horizontal_scroll_text_edit(self._tts_test_text)
         self._tts_test_text.setFixedHeight(92)
         layout.addWidget(self._tts_test_text)
 

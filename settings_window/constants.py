@@ -365,5 +365,14 @@ def _wrap_label(label: QLabel):
     return label
 
 
+def _horizontal_scroll_text_edit(edit: QTextEdit):
+    edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+    edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    edit.setMinimumWidth(0)
+    edit.setSizePolicy(QSizePolicy.Policy.Expanding, edit.sizePolicy().verticalPolicy())
+    return edit
+
+
 # Populate __all__ with all public and underscored names that should be exported
 __all__ = [name for name in dir() if not name.startswith('__')]

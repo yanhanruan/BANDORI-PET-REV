@@ -111,7 +111,7 @@ class POVPageMixin:
         layout.addWidget(prompt_label)
         self._pov_custom_prompt = FluentContextTextEdit(page)
         self._pov_custom_prompt.setPlaceholderText(_tr("SettingsWindow.pov_custom_prompt_placeholder"))
-        self._pov_custom_prompt.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        _horizontal_scroll_text_edit(self._pov_custom_prompt)
         self._pov_custom_prompt.setMinimumHeight(64)
         self._pov_custom_prompt.setMaximumHeight(96)
         layout.addWidget(self._pov_custom_prompt)

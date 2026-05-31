@@ -185,7 +185,7 @@ class MemoryPageMixin:
 
         self._memory_content = FluentContextTextEdit(page)
         self._memory_content.setPlaceholderText(_tr("SettingsWindow.memory_content_placeholder"))
-        self._memory_content.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        _horizontal_scroll_text_edit(self._memory_content)
         self._memory_content.setMinimumHeight(96)
         self._memory_content.setMaximumHeight(150)
         layout.addWidget(self._memory_content)

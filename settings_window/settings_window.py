@@ -571,8 +571,8 @@ class SettingsWindow(
         page_scroll.setWidgetResizable(True)
         page_scroll.setWidget(self._page_stack)
         page_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._reserve_overlay_scrollbar(page_scroll)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._reserve_overlay_scrollbar(page_scroll, horizontal=True)
 
         side_panel = self._build_side_panel()
 
@@ -1274,7 +1274,7 @@ class SettingsWindow(
             nav_content.setAutoFillBackground(True)
 
     @staticmethod
-    def _reserve_overlay_scrollbar(scroll):
+    def _reserve_overlay_scrollbar(scroll, horizontal=False):
         """Reserve space on the right for qfluentwidgets' overlay scrollbar.
 
         ``ScrollArea`` forces the native scrollbar off and floats a 12px-wide
@@ -1282,7 +1282,7 @@ class SettingsWindow(
         overlaps the rightmost text/UI. Insetting the viewport keeps the
         floating bar in its own gutter instead of on top of the content.
         """
-        scroll.setViewportMargins(0, 0, 14, 0)
+        scroll.setViewportMargins(0, 0, 14, 14 if horizontal else 0)
 
     def _build_sidebar(self):
         sidebar = QWidget()

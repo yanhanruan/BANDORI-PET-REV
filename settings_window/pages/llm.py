@@ -268,7 +268,7 @@ class LLMPageMixin:
             "SettingsWindow.llm_custom_system_prompt_placeholder",
             default="关闭开关可临时禁用且保留内容。这里的内容会在每次聊天请求中置于角色设定之前。",
         ))
-        self._llm_custom_system_prompt.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        _horizontal_scroll_text_edit(self._llm_custom_system_prompt)
         self._llm_custom_system_prompt.setMinimumHeight(72)
         self._llm_custom_system_prompt.setMaximumHeight(120)
         layout.addWidget(self._llm_custom_system_prompt)
