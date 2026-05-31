@@ -574,10 +574,13 @@ class Live2DWidget(QOpenGLWidget):
     # --------------------------------------------------------------------------
 
     def initializeGL(self):
+        from gpu_acceleration import log_opengl_renderer_once
+
         if self._live2d:
             self._live2d.glInit()
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glDisable(gl.GL_DITHER)
+        log_opengl_renderer_once(gl)
         
         self._system_scale = QGuiApplication.primaryScreen().devicePixelRatio()
         self._initialized_gl = True

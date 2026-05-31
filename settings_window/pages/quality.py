@@ -46,6 +46,21 @@ class QualityPageMixin:
         self._quality_detail.setWordWrap(True)
         layout.addWidget(self._quality_detail)
 
+        gpu_label = BodyLabel(_tr("SettingsWindow.gpu_acceleration"), page)
+        gpu_hint = _tr("SettingsWindow.gpu_acceleration_tip")
+        gpu_label.setToolTip(gpu_hint)
+        self._gpu_acceleration_switch = SwitchButton(page)
+        self._gpu_acceleration_switch.setChecked(self._gpu_acceleration)
+        self._gpu_acceleration_switch.setToolTip(gpu_hint)
+        self._gpu_acceleration_switch.checkedChanged.connect(self._on_gpu_acceleration_changed)
+        gpu_row = QHBoxLayout()
+        gpu_row.setContentsMargins(0, 0, 0, 0)
+        gpu_row.setSpacing(10)
+        gpu_row.addWidget(gpu_label)
+        gpu_row.addStretch()
+        gpu_row.addWidget(self._gpu_acceleration_switch)
+        layout.addLayout(gpu_row)
+
         fps_label = BodyLabel(_tr("SettingsWindow.side_fps"), page)
         layout.addWidget(fps_label)
         self._fps_slider = Slider(Qt.Orientation.Horizontal, page)
@@ -140,6 +155,9 @@ class QualityPageMixin:
         profile = self._quality_combo.itemData(index)
         self._live2d_quality = normalize_live2d_quality(profile)
         self._quality_detail.setText(self._quality_detail_text(self._live2d_quality))
+
+    def _on_gpu_acceleration_changed(self, checked: bool):
+        self._gpu_acceleration = bool(checked)
 
     def _set_live2d_scale_controls(self, value: int):
         value = clamp_live2d_scale(value, use_device_pixel_ratio_default=True)

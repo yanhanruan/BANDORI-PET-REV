@@ -113,10 +113,13 @@ class Live2DPreviewRenderWidget(QOpenGLWidget):
                 self.doneCurrent()
 
     def initializeGL(self):
+        from gpu_acceleration import log_opengl_renderer_once
+
         if self._live2d:
             self._live2d.glInit()
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glDisable(gl.GL_DITHER)
+        log_opengl_renderer_once(gl, prefix="[GPU Preview]")
         self._initialized_gl = True
         if self._pending_model:
             self._load_model(self._pending_model)

@@ -4,8 +4,10 @@ import os
 import sys
 
 from process_utils import app_base_dir, configure_debug_logging, ensure_xwayland, install_parent_death_watch
+from gpu_acceleration import configure_qt_opengl_environment
 
 configure_debug_logging()
+configure_qt_opengl_environment()
 
 BASE_DIR = str(app_base_dir())
 
@@ -19,6 +21,7 @@ from live2d_widget import Live2DWidget
 from live2d_lua_adapter import live2d
 from model_manager import ModelManager, models_dir_exists, prompt_download_model_resources
 from pet_window import PetWindow
+from gpu_acceleration import configure_qt_gpu_acceleration
 
 
 def _parse_args():
@@ -89,9 +92,7 @@ def main():
     cfg = ConfigManager()
     set_language(cfg.get("language", "") or detect_system_language())
 
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-    if sys.platform != "darwin":
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    configure_qt_gpu_acceleration(QApplication, Qt, cfg)
     Live2DWidget.configure_default_surface_format()
 
     app = QApplication(sys.argv)

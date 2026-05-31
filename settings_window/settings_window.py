@@ -116,6 +116,9 @@ class SettingsWindow(
         self._current_page = "characters"
         self._selecting_model = False
         self._vsync = vsync
+        self._gpu_acceleration = (
+            bool(self._cfg.get("gpu_acceleration", True)) if self._cfg else True
+        )
         self._game_topmost = bool(self._cfg.get("game_topmost", False)) if self._cfg else False
         self._chat_window_normal_window = (
             bool(self._cfg.get("chat_window_normal_window", False)) if self._cfg else False
@@ -2532,6 +2535,11 @@ class SettingsWindow(
             return bool(self._vsync_switch.isChecked())
         return bool(self._vsync)
 
+    def _current_gpu_acceleration_setting(self) -> bool:
+        if hasattr(self, "_gpu_acceleration_switch"):
+            return bool(self._gpu_acceleration_switch.isChecked())
+        return bool(self._gpu_acceleration)
+
     def _on_apply(self):
         if self._launched:
             return
@@ -2566,6 +2574,7 @@ class SettingsWindow(
             "opacity": self._current_opacity_setting(),
             "dark_theme": self._current_theme_setting(),
             "vsync": self._current_vsync_setting(),
+            "gpu_acceleration": self._current_gpu_acceleration_setting(),
             "game_topmost": self._game_topmost_switch.isChecked(),
             "chat_window_normal_window": self._chat_window_normal_window_switch.isChecked(),
             "hide_live2d_model": self._hide_live2d_model_switch.isChecked(),
@@ -2615,6 +2624,7 @@ class SettingsWindow(
             self._cfg.set("opacity", settings["opacity"])
             self._cfg.set("dark_theme", settings["dark_theme"])
             self._cfg.set("vsync", settings["vsync"])
+            self._cfg.set("gpu_acceleration", settings["gpu_acceleration"])
             self._cfg.set("game_topmost", settings["game_topmost"])
             self._cfg.set("chat_window_normal_window", settings["chat_window_normal_window"])
             self._cfg.set("hide_live2d_model", settings["hide_live2d_model"])

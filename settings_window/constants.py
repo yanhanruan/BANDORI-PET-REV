@@ -287,6 +287,7 @@ DATA_CONFIG_KEYS = {
         "opacity",
         "dark_theme",
         "vsync",
+        "gpu_acceleration",
         "game_topmost",
         "chat_window_normal_window",
         "hide_live2d_model",
