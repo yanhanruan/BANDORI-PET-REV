@@ -243,6 +243,7 @@ class DataManagementPageMixin:
             self._cfg.set("opacity", self._opacity_slider.value() / 100.0)
             self._cfg.set("dark_theme", self._theme_combo.currentData())
             self._cfg.set("vsync", self._current_vsync_setting())
+            self._cfg.set("gpu_acceleration", self._current_gpu_acceleration_setting())
             self._cfg.set("game_topmost", self._game_topmost_switch.isChecked())
             self._cfg.set("chat_window_normal_window", self._chat_window_normal_window_switch.isChecked())
             self._cfg.set("hide_live2d_model", self._hide_live2d_model_switch.isChecked())
@@ -563,6 +564,7 @@ class DataManagementPageMixin:
         self._fps = int(self._cfg.get("fps", self._fps) or self._fps)
         self._opacity = float(self._cfg.get("opacity", self._opacity) or self._opacity)
         self._vsync = bool(self._cfg.get("vsync", self._vsync))
+        self._gpu_acceleration = bool(self._cfg.get("gpu_acceleration", self._gpu_acceleration))
         self._game_topmost = bool(self._cfg.get("game_topmost", self._game_topmost))
         self._chat_window_normal_window = bool(
             self._cfg.get("chat_window_normal_window", self._chat_window_normal_window)
@@ -620,6 +622,10 @@ class DataManagementPageMixin:
                 self._vsync_switch.setChecked(self._vsync)
                 self._vsync_switch.blockSignals(False)
             self._on_vsync_changed(self._vsync)
+        if hasattr(self, "_gpu_acceleration_switch"):
+            self._gpu_acceleration_switch.blockSignals(True)
+            self._gpu_acceleration_switch.setChecked(self._gpu_acceleration)
+            self._gpu_acceleration_switch.blockSignals(False)
         if hasattr(self, "_opacity_slider"):
             self._opacity_slider.setValue(max(20, min(100, int(self._opacity * 100))))
             self._game_topmost_switch.setChecked(self._game_topmost)

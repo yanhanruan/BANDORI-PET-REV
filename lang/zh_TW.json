@@ -532,6 +532,8 @@
   "SettingsWindow.quality_balanced": "均衡",
   "SettingsWindow.quality_detail_performance": "使用最近鄰紋理過濾，適合內顯、遠端桌面或多角色同時執行。",
   "SettingsWindow.quality_detail_balanced": "使用線性紋理過濾，兼顧清晰度與流暢度。",
+  "SettingsWindow.gpu_acceleration": "GPU 加速",
+  "SettingsWindow.gpu_acceleration_tip": "開啟後優先使用硬體 OpenGL 渲染 Live2D；關閉後下次啟動會改用軟體渲染。",
   "SettingsWindow.preview_failed_title": "預覽載入失敗",
   "SettingsWindow.preview_failed_content": "Live2D 服裝預覽初始化失敗：{error}",
   "SettingsWindow.live2d_scale": "模型縮放（%）",

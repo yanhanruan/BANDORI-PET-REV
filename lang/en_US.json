@@ -532,6 +532,8 @@
   "SettingsWindow.quality_balanced": "Balanced",
   "SettingsWindow.quality_detail_performance": "Uses nearest texture filtering for integrated GPUs, remote desktops, or many pets at once.",
   "SettingsWindow.quality_detail_balanced": "Uses linear texture filtering for a good mix of clarity and smoothness.",
+  "SettingsWindow.gpu_acceleration": "GPU Acceleration",
+  "SettingsWindow.gpu_acceleration_tip": "When enabled, Live2D prefers hardware OpenGL. Turn it off to use software rendering on the next launch.",
   "SettingsWindow.preview_failed_title": "Preview Failed",
   "SettingsWindow.preview_failed_content": "Live2D costume preview failed to initialize: {error}",
   "SettingsWindow.live2d_scale": "Model Scale (%)",

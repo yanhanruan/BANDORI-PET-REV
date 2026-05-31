@@ -48,6 +48,7 @@ QQ群：1046229865
 - **Python 3.10+** & **LuaJIT 2.1+**
 - Windows, macOS, Linux(部分兼容)
 - 支持 OpenGL 3.3+ 的显卡（核显也能跑）
+- Live2D 默认启用 Qt 硬件 OpenGL/GPU 加速；如需排查驱动问题，可设置 `BANDORI_GPU_ACCELERATION=0` 临时切换到软件渲染。
 
 ### 2. 克隆仓库
 
