@@ -11,9 +11,9 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from llm_api_compat import chat_completions_api_url, sanitize_chat_body_for_url
 from process_utils import app_base_dir
+from tts_common import strip_tts_action_tags
 
 
-_ACTION_TAG_RE = re.compile(r"\[(?:DONE|[A-Za-z0-9_.\-]+)\]")
 _DIALOG_GROUPS_KEY = "__groups"
 _WORD_RE = re.compile(r"[A-Za-z']+")
 _NUMPY_MODULE = None
@@ -150,10 +150,6 @@ def _build_translation_system_prompt(target_language_name: str, text: str = "") 
 
 def flush_tts_sentence(buffer: str) -> str:
     return buffer.strip()
-
-
-def strip_tts_action_tags(text: str) -> str:
-    return _ACTION_TAG_RE.sub("", text).strip()
 
 
 def _aux_model_enable_thinking(config: dict):

@@ -67,6 +67,16 @@ def sanitize_chat_body_for_url(body: dict, api_url: str) -> dict:
     return body
 
 
+def supports_openai_responses_api(api_url: str) -> bool:
+    return "api.openai.com" in (api_url or "").lower()
+
+
+def use_responses_api(config: dict | None, api_url: str = "") -> bool:
+    if not config or config.get("llm_api_mode", "chat_completions") != "responses":
+        return False
+    return supports_openai_responses_api(api_url or config.get("llm_api_url", ""))
+
+
 def _google_openai_chat_completions_url(api_url: str) -> str:
     parts = urlsplit(api_url)
     path = parts.path.rstrip("/")

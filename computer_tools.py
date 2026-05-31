@@ -3,11 +3,11 @@ import ctypes
 import io
 import json
 import os
-import threading
 import time
 
 from PIL import ImageGrab
 
+from process_utils import run_off_gui_thread
 from vision_fallback import analyze_images_with_aux_model
 
 
@@ -238,7 +238,7 @@ def _screenshot_result(config: dict, content: str) -> dict:
 def _capture_screenshot_data_url(config: dict) -> tuple[str, int, int, int, int]:
     global _LAST_SCREENSHOT_METRICS
     try:
-        image = _run_off_gui_thread(lambda: ImageGrab.grab(all_screens=True))
+        image = run_off_gui_thread(lambda: ImageGrab.grab(all_screens=True))
     except Exception:
         raise RuntimeError("Failed to capture screenshot. This may happen when no display is available or a security restriction prevents screen capture.")
     max_width = max(640, min(1920, _int(config.get("computer_use_max_screenshot_width", 1280))))
@@ -262,35 +262,6 @@ def _capture_screenshot_data_url(config: dict) -> tuple[str, int, int, int, int]
     image.save(buffer, format="PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}", width, height, desktop_width, desktop_height
-
-
-def _run_off_gui_thread(fn):
-    try:
-        from PySide6.QtCore import QThread
-        from PySide6.QtWidgets import QApplication
-    except Exception:
-        return fn()
-    app = QApplication.instance()
-    if app is None or QThread.currentThread() is not app.thread():
-        return fn()
-
-    done = threading.Event()
-    result = {}
-
-    def worker():
-        try:
-            result["value"] = fn()
-        except Exception as exc:
-            result["error"] = exc
-        finally:
-            done.set()
-
-    threading.Thread(target=worker, daemon=True).start()
-    while not done.wait(0.02):
-        app.processEvents()
-    if "error" in result:
-        raise result["error"]
-    return result.get("value")
 
 
 def _require(config: dict, key: str, label: str):

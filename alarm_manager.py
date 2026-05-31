@@ -34,9 +34,10 @@ from reminder_core import (
     pomodoro_phase_label,
     repeat_days_label,
 )
+from tts_common import SingleShotTTSCallbacksMixin, strip_tts_action_tags
 
 try:
-    from tts_manager import TTSPlayer, TTSRequestWorker, strip_tts_action_tags
+    from tts_manager import TTSPlayer, TTSRequestWorker
     _TTS_AVAILABLE = True
 except (ImportError, OSError):
     _TTS_AVAILABLE = False
@@ -51,11 +52,8 @@ except (ImportError, OSError):
 
     TTSRequestWorker = None
 
-    def strip_tts_action_tags(text: str) -> str:
-        return str(text or "").strip()
 
-
-class ReminderScheduler(QObject):
+class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
     def __init__(self, config_manager, model_manager, broadcast_event, system_notify, parent=None):
         super().__init__(parent)
         self._cfg = config_manager
@@ -477,33 +475,6 @@ class ReminderScheduler(QObject):
         worker.error.connect(self._on_tts_error)
         worker.finished.connect(self._on_tts_worker_finished)
         worker.start()
-
-    def _on_tts_audio_ready(self, sequence: int, generation: int, audio: bytes, media_type: str):
-        del sequence
-        if generation != self._tts_generation or self.sender() is not self._tts_worker:
-            return
-        if self._tts_worker is not None and self._tts_player is not None:
-            self._tts_player.prepare_lip_sync_text(
-                getattr(self._tts_worker, "prepared_text", ""),
-                getattr(self._tts_worker, "prepared_language", ""),
-            )
-            self._tts_player.enqueue(audio, media_type)
-
-    def _on_tts_error(self, error_msg: str):
-        _log.warning("TTS error: %s", error_msg)
-
-    def _on_tts_worker_finished(self):
-        if self.sender() is self._tts_worker:
-            self._tts_worker = None
-
-    def _on_tts_mouth_pose_changed(self, level: float, form: float):
-        if self._tts_playing_character:
-            publish_lip_sync(self._tts_playing_character, level, form)
-
-    def _on_tts_playback_finished(self):
-        if self._tts_playing_character:
-            publish_lip_sync(self._tts_playing_character, 0.0)
-        self._tts_playing_character = ""
 
     def _park_cancelled_tts_worker(self, worker):
         if worker is None:

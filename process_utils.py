@@ -312,3 +312,32 @@ def hidden_subprocess_kwargs() -> dict:
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
         "startupinfo": startupinfo,
     }
+
+
+def run_off_gui_thread(fn):
+    try:
+        from PySide6.QtCore import QThread
+        from PySide6.QtWidgets import QApplication
+    except Exception:
+        return fn()
+    app = QApplication.instance()
+    if app is None or QThread.currentThread() is not app.thread():
+        return fn()
+
+    done = threading.Event()
+    result = {}
+
+    def worker():
+        try:
+            result["value"] = fn()
+        except Exception as exc:
+            result["error"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=worker, daemon=True).start()
+    while not done.wait(0.02):
+        app.processEvents()
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")

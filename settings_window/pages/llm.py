@@ -818,7 +818,9 @@ class LLMPageMixin:
         self._llm_custom_system_prompt.setEnabled(bool(enabled))
 
     def _supports_openai_responses_api(self, api_url: str) -> bool:
-        return "api.openai.com" in (api_url or "").lower()
+        from llm_api_compat import supports_openai_responses_api
+
+        return supports_openai_responses_api(api_url)
 
     def _effective_llm_api_mode(self) -> str:
         mode = self._llm_api_mode.itemData(self._llm_api_mode.currentIndex())

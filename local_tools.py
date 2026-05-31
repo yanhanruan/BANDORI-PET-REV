@@ -2,7 +2,6 @@ import base64
 import gzip
 import json
 import re
-import threading
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -11,6 +10,7 @@ from html import unescape
 
 from computer_tools import computer_tools, is_computer_tool_name, run_computer_tool
 from mcp_bridge import call_mcp_tool, is_mcp_tool_name, mcp_native_tools, mcp_proxy_tools
+from process_utils import run_off_gui_thread
 from reminder_core import (
     ALARM_CONFIG_KEY,
     POMODORO_CONFIG_KEY,
@@ -524,7 +524,7 @@ def _is_bad_search_query(query: str) -> bool:
 
 
 def _request_text(url: str, timeout: int = 12) -> str:
-    return _run_off_gui_thread(lambda: _request_text_direct(url, timeout))
+    return run_off_gui_thread(lambda: _request_text_direct(url, timeout))
 
 
 def _request_text_direct(url: str, timeout: int = 12) -> str:
@@ -542,35 +542,6 @@ def _request_text_direct(url: str, timeout: int = 12) -> str:
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         charset = resp.headers.get_content_charset() or "utf-8"
         return resp.read().decode(charset, errors="replace")
-
-
-def _run_off_gui_thread(fn):
-    try:
-        from PySide6.QtCore import QThread
-        from PySide6.QtWidgets import QApplication
-    except Exception:
-        return fn()
-    app = QApplication.instance()
-    if app is None or QThread.currentThread() is not app.thread():
-        return fn()
-
-    done = threading.Event()
-    result = {}
-
-    def worker():
-        try:
-            result["value"] = fn()
-        except Exception as exc:
-            result["error"] = exc
-        finally:
-            done.set()
-
-    threading.Thread(target=worker, daemon=True).start()
-    while not done.wait(0.02):
-        app.processEvents()
-    if "error" in result:
-        raise result["error"]
-    return result.get("value")
 
 
 def _enrich_results_with_page_excerpts(results: list[dict], max_pages: int = 2):

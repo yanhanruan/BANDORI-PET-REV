@@ -1,7 +1,7 @@
 import os
 
-from PySide6.QtCore import Qt, QRectF, QEvent, Signal, QTimer, QSize
-from PySide6.QtGui import QPainter, QPainterPath, QPixmap, QColor, QFont
+from PySide6.QtCore import Qt, QRectF, Signal, QTimer, QSize
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QTextEdit,
     QWidget,

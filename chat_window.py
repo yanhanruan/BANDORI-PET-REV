@@ -56,7 +56,7 @@ from llm_manager import (
     build_system_prompt, LLMStreamWorker, ResponsesStreamWorker, NonStreamWorker,
     parse_action_tags, strip_action_tags, extract_inline_search_sources,
 )
-from llm_api_compat import chat_completions_api_url
+from llm_api_compat import chat_completions_api_url, supports_openai_responses_api, use_responses_api
 from llm_error_hints import format_llm_error_message
 from vision_fallback import analyze_images_with_aux_model
 from chat_config_snapshots import (
@@ -66,8 +66,9 @@ from chat_config_snapshots import (
 )
 from local_tools import reminder_tools_enabled
 from chat_commands import handle_command as _handle_chat_command
+from tts_common import clean_tts_payload, strip_tts_action_tags
 try:
-    from tts_manager import TTSPlayer, TTSRequestWorker, TTSTranslationWorker, flush_tts_sentence, strip_tts_action_tags
+    from tts_manager import TTSPlayer, TTSRequestWorker, TTSTranslationWorker, flush_tts_sentence
     _TTS_AVAILABLE = True
 except (ImportError, OSError):
     _TTS_AVAILABLE = False
@@ -87,9 +88,6 @@ except (ImportError, OSError):
     def flush_tts_sentence(buffer: str) -> str:
         return buffer.strip()
 
-    def strip_tts_action_tags(text: str) -> str:
-        import re as _re
-        return _re.sub(r"\[(?:DONE|[A-Za-z0-9_.\-]+)\]", "", text).strip()
 from relationship_memory import (
     GLOBAL_MEMORY_CHARACTER,
     analyze_interaction,
@@ -5122,13 +5120,10 @@ class ChatWindow(QWidget):
         return any(not str(item.get("vision_summary", "") or "").strip() for item in items)
 
     def _supports_openai_responses_api(self, api_url: str) -> bool:
-        url = (api_url or "").lower()
-        return "api.openai.com" in url
+        return supports_openai_responses_api(api_url)
 
     def _use_responses_api(self, api_url: str = "") -> bool:
-        if not self._cfg or self._cfg.get("llm_api_mode", "chat_completions") != "responses":
-            return False
-        return self._supports_openai_responses_api(api_url or self._cfg.get("llm_api_url", ""))
+        return use_responses_api(self._cfg, api_url)
 
     def _chat_completions_api_url(self, api_url: str) -> str:
         return chat_completions_api_url(api_url)
@@ -6025,8 +6020,7 @@ class ChatWindow(QWidget):
 
     def _clean_tts_payload(self, text: str) -> str:
         text, _ = extract_inline_search_sources(text)
-        text = re.sub(r"\{\s*\"(?:web_search_sources|search_sources|sources)\"\s*:\s*\[.*", "", text, flags=re.S)
-        return strip_tts_action_tags(text).strip()
+        return clean_tts_payload(text, strip_search_sources=True)
 
     def _tts_should_translate(self) -> bool:
         if not self._cfg or not self._cfg.get("tts_translate_to_selected_language", True):

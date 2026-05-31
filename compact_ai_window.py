@@ -1,6 +1,5 @@
 import ctypes
 import ctypes.wintypes
-import logging
 import os
 import re
 import sys
@@ -26,7 +25,7 @@ from llm_manager import (
     parse_action_tags,
     strip_action_tags,
 )
-from llm_api_compat import chat_completions_api_url
+from llm_api_compat import chat_completions_api_url, supports_openai_responses_api, use_responses_api
 from llm_error_hints import format_llm_error_message
 from chat_config_snapshots import (
     memory_extraction_api_config,
@@ -35,8 +34,9 @@ from chat_config_snapshots import (
 )
 from local_tools import reminder_tools_enabled
 from chat_commands import handle_command as _handle_chat_command
+from tts_common import SingleShotTTSCallbacksMixin, clean_tts_payload
 try:
-    from tts_manager import TTSPlayer, TTSRequestWorker, strip_tts_action_tags
+    from tts_manager import TTSPlayer, TTSRequestWorker
     _TTS_AVAILABLE = True
 except (ImportError, OSError):
     _TTS_AVAILABLE = False
@@ -52,8 +52,6 @@ except (ImportError, OSError):
         def is_idle(self): return True
     TTSRequestWorker = None
 
-    def strip_tts_action_tags(text: str) -> str:
-        return re.sub(r"\[(?:DONE|[A-Za-z0-9_.\-]+)\]", "", text).strip()
 from database_manager import DatabaseManager
 from i18n_manager import tr as _tr
 from relationship_memory import (
@@ -173,7 +171,7 @@ class CompactSendButton(QPushButton):
         )
 
 
-class CompactAIWindow(QWidget):
+class CompactAIWindow(SingleShotTTSCallbacksMixin, QWidget):
     action_triggered = Signal(str)
 
     def __init__(self, character: str, model_manager, config_manager, parent=None):
@@ -860,12 +858,10 @@ class CompactAIWindow(QWidget):
                 break
 
     def _supports_openai_responses_api(self, api_url: str) -> bool:
-        return "api.openai.com" in (api_url or "").lower()
+        return supports_openai_responses_api(api_url)
 
     def _use_responses_api(self, api_url: str = "") -> bool:
-        if not self._cfg or self._cfg.get("llm_api_mode", "chat_completions") != "responses":
-            return False
-        return self._supports_openai_responses_api(api_url or self._cfg.get("llm_api_url", ""))
+        return use_responses_api(self._cfg, api_url)
 
     def _chat_completions_api_url(self, api_url: str) -> str:
         return chat_completions_api_url(api_url)
@@ -1134,8 +1130,7 @@ class CompactAIWindow(QWidget):
         return bool(_TTS_AVAILABLE and self._cfg and self._cfg.get("tts_enabled", False))
 
     def _clean_tts_payload(self, text: str) -> str:
-        text = re.sub(r"\{\s*\"(?:web_search_sources|search_sources|sources)\"\s*:\s*\[.*", "", text, flags=re.S)
-        return strip_tts_action_tags(text).strip()
+        return clean_tts_payload(text, strip_search_sources=True)
 
     def _reset_tts(self, stop_player: bool = True):
         self._tts_generation += 1
@@ -1166,33 +1161,6 @@ class CompactAIWindow(QWidget):
         worker.error.connect(self._on_tts_error)
         worker.finished.connect(self._on_tts_worker_finished)
         worker.start()
-
-    def _on_tts_audio_ready(self, sequence: int, generation: int, audio: bytes, media_type: str):
-        del sequence
-        if generation != self._tts_generation or self.sender() is not self._tts_worker:
-            return
-        if self._tts_worker is not None:
-            self._tts_player.prepare_lip_sync_text(
-                getattr(self._tts_worker, "prepared_text", ""),
-                getattr(self._tts_worker, "prepared_language", ""),
-            )
-        self._tts_player.enqueue(audio, media_type)
-
-    def _on_tts_error(self, error_msg: str):
-        logging.getLogger(__name__).warning("TTS error: %s", error_msg)
-
-    def _on_tts_worker_finished(self):
-        if self.sender() is self._tts_worker:
-            self._tts_worker = None
-
-    def _on_tts_mouth_pose_changed(self, level: float, form: float):
-        if self._tts_playing_character:
-            publish_lip_sync(self._tts_playing_character, level, form)
-
-    def _on_tts_playback_finished(self):
-        if self._tts_playing_character:
-            publish_lip_sync(self._tts_playing_character, 0.0)
-        self._tts_playing_character = ""
 
     def _on_response_error(self, error_msg: str):
         if self.sender() is not self._worker:
