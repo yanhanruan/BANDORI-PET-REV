@@ -171,6 +171,7 @@ class TTSPageMixin:
             QTextEdit:focus {{
                 border-color: {BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY};
             }}
+            {_fluent_scrollbar_qss(dark=dark)}
         """
         self._tts_api_url.setStyleSheet(style)
         self._tts_temperature.setStyleSheet(style)

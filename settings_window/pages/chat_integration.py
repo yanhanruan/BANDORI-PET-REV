@@ -207,6 +207,7 @@ class ChatIntegrationPageMixin:
                 padding-left: 0px;
                 selection-background-color: {BANDORI_PRIMARY};
             }}
+            {_fluent_scrollbar_qss(dark=dark)}
             #NapcatRecordCombo {{
                 color: {text};
                 background-color: {input_bg};

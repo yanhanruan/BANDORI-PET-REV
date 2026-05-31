@@ -190,6 +190,7 @@ class POVPageMixin:
                 font-size: 13px;
                 line-height: 1.35em;
             }}
+            {_fluent_scrollbar_qss(dark=dark)}
         """)
 
     def _on_pov_mode_changed(self, index: int):

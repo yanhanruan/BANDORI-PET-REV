@@ -374,5 +374,71 @@ def _horizontal_scroll_text_edit(edit: QTextEdit):
     return edit
 
 
+def _fluent_scrollbar_qss(selector: str = "QScrollBar", dark: bool | None = None) -> str:
+    if dark is None:
+        dark = isDarkTheme()
+    handle = "#6b6b6b" if dark else "#c8c8c8"
+    handle_hover = "#828282" if dark else "#a8a8a8"
+    handle_pressed = BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY
+    return f"""
+        {selector}:vertical {{
+            background: transparent;
+            border: none;
+            width: 12px;
+            margin: 0px;
+        }}
+        {selector}::handle:vertical {{
+            background: {handle};
+            border-radius: 4px;
+            min-height: 28px;
+            margin: 2px;
+        }}
+        {selector}::handle:vertical:hover {{
+            background: {handle_hover};
+        }}
+        {selector}::handle:vertical:pressed {{
+            background: {handle_pressed};
+        }}
+        {selector}::add-line:vertical,
+        {selector}::sub-line:vertical {{
+            height: 0px;
+            border: none;
+            background: transparent;
+        }}
+        {selector}::add-page:vertical,
+        {selector}::sub-page:vertical {{
+            background: transparent;
+        }}
+        {selector}:horizontal {{
+            background: transparent;
+            border: none;
+            height: 12px;
+            margin: 0px;
+        }}
+        {selector}::handle:horizontal {{
+            background: {handle};
+            border-radius: 4px;
+            min-width: 28px;
+            margin: 2px;
+        }}
+        {selector}::handle:horizontal:hover {{
+            background: {handle_hover};
+        }}
+        {selector}::handle:horizontal:pressed {{
+            background: {handle_pressed};
+        }}
+        {selector}::add-line:horizontal,
+        {selector}::sub-line:horizontal {{
+            width: 0px;
+            border: none;
+            background: transparent;
+        }}
+        {selector}::add-page:horizontal,
+        {selector}::sub-page:horizontal {{
+            background: transparent;
+        }}
+    """
+
+
 # Populate __all__ with all public and underscored names that should be exported
 __all__ = [name for name in dir() if not name.startswith('__')]

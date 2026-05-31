@@ -174,6 +174,7 @@ class MCPPageMixin:
                 padding-left: 0px;
                 selection-background-color: {BANDORI_PRIMARY};
             }}
+            {_fluent_scrollbar_qss(dark=dark)}
         """)
         self._refresh_theme_widget_styles(page)
         self._refresh_json_code_edit_theme(getattr(self, "_llm_mcp_servers_text", None))

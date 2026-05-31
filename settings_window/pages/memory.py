@@ -507,4 +507,5 @@ class MemoryPageMixin:
             QTextEdit:focus {{
                 border-color: {BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY};
             }}
+            {_fluent_scrollbar_qss(dark=dark)}
         """)
