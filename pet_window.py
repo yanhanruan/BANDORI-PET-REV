@@ -2744,7 +2744,3 @@ class PetWindow(QWidget):
         self._entrance_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._entrance_anim.start()
 
-
-def isDarkTheme():
-    from qfluentwidgets import isDarkTheme as _is_dark
-    return _is_dark()
