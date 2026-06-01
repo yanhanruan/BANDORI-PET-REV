@@ -2682,9 +2682,9 @@ class SettingsWindow(
             self._cfg.set("live2d_quality", settings["live2d_quality"])
             self._cfg.set("live2d_scale", settings["live2d_scale"])
             self._cfg.save()
+        self.settings_changed.emit(settings)
         if self._current_char and self._selected_costume:
             self.model_selected.emit(self._current_char, self._selected_costume)
-        self.settings_changed.emit(settings)
         if self._show_launch:
             self.launch_requested.emit()
         self.close()

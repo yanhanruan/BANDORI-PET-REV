@@ -2818,11 +2818,7 @@ class PetWindow(QWidget):
                 self._cfg.set("dark_theme", _THEME_ON if isDarkTheme() else _THEME_OFF)
             self._cfg.set("vsync", self._vsync)
             self._cfg.set("game_topmost", self._game_topmost)
-            self._cfg.set("hide_live2d_model", self._hide_live2d_model)
-            self._cfg.set("live2d_idle_actions_enabled", self._live2d_idle_actions_enabled)
-            self._cfg.set("live2d_head_tracking_enabled", self._live2d_head_tracking_enabled)
-            self._cfg.set("live2d_mutual_gaze_enabled", self._live2d_mutual_gaze_enabled)
-            self._cfg.set("move_all_roles_together", self._move_all_roles_together)
+
             self._cfg.set("live2d_quality", self._live2d_quality)
             self._cfg.set("live2d_scale", self._live2d_scale)
             self._cfg.set("live2d_hit_alpha_threshold", self._live2d_hit_alpha_threshold)
