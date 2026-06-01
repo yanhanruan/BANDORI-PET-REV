@@ -594,9 +594,6 @@ class PetWindow(QWidget):
         if os.name != "nt" or not self.isVisible():
             self._set_windows_mouse_passthrough(False)
             return
-        if self._is_radial_menu_visible():
-            self._set_windows_mouse_passthrough(False)
-            return
         global_pos = QCursor.pos()
         sample_pos = self._windows_passthrough_sample_pos(global_pos)
         if sample_pos is None:
@@ -1943,8 +1940,10 @@ class PetWindow(QWidget):
                 self._radial_menu_socket.connectToServer(self._radial_menu_server_name)
         elif line == "STATE\tOPEN":
             self._radial_menu_visible = True
+            self._tick_windows_mouse_passthrough()
         elif line == "STATE\tCLOSED":
             self._radial_menu_visible = False
+            self._tick_windows_mouse_passthrough()
         elif line.startswith("ACT\t"):
             action = line.split("\t", 1)[1].strip()
             handlers = {
