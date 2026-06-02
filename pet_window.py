@@ -1763,6 +1763,9 @@ class PetWindow(QWidget):
                 self._layer_index = self._compute_layer_index()
             self._cfg.set("models", data["models"])
             self._cfg.save()
+        if "models" in data or "model_action_settings" in data:
+            self._live2d_prewarm_token += 1
+            self._schedule_live2d_action_prewarm(self._live2d_prewarm_token)
         self._save_config()
 
     def _live2d_size(self):

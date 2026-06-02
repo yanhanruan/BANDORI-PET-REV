@@ -761,7 +761,7 @@ class Live2DWidget(QOpenGLWidget):
         alpha = self._alpha_near(x, y, sync=True)
         self._last_hit_test_ms = self._hit_clock.elapsed()
         self._last_hit_test_key = self._hit_key_for(x, y)
-        self._last_hit_state = alpha > self._hit_alpha_threshold
+        self._last_hit_state = alpha > self._hit_alpha_threshold or self._is_model_geometry_hit_at(x, y)
         return self._last_hit_state
 
     def _hit_state_at(self, x: float, y: float):

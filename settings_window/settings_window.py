@@ -2871,6 +2871,10 @@ class SettingsWindow(
             self._cfg.set("costume", "")
         self._cfg.set("models", [dict(item) for item in self._configured_models])
         self._cfg.save()
+        self.settings_changed.emit({
+            "models": [dict(item) for item in self._configured_models],
+            "model_action_settings": self._cfg.get("model_action_settings", {}),
+        })
 
     def _refresh_model_list(self):
         while self._model_list_layout.count():
