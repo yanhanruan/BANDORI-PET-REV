@@ -88,7 +88,7 @@ def main():
     apply_app_theme(cfg.get("dark_theme", False))
 
     mgr = ModelManager()
-    pet_window_ref = {"processes": []}
+    pet_window_ref = {"processes": [], "closing_processes": []}
     ipc_ref = {"clients": [], "buffers": {}, "lock": threading.RLock()}
     ai_status_ref = {"server": None}
     chat_integration_ref = {"server": None, "db": None, "lock": threading.RLock()}
@@ -684,23 +684,35 @@ def main():
         cfg.set("language", current_language())
         cfg.save()
 
-    def _close_qprocess(process, force=False):
+    def _close_qprocess(process, force=False, wait=True):
         if not process or not isValid(process):
             return
-        try:
-            process.finished.disconnect()
-        except RuntimeError:
-            pass
+        if wait:
+            try:
+                process.finished.disconnect()
+            except RuntimeError:
+                pass
         if process.state() != QProcess.ProcessState.NotRunning:
             process.terminate()
+            if not wait:
+                def kill_if_still_running(p=process):
+                    if isValid(p) and p.state() != QProcess.ProcessState.NotRunning:
+                        p.kill()
+
+                QTimer.singleShot(1500, kill_if_still_running)
+                return
             if not process.waitForFinished(1000):
                 process.kill()
                 process.waitForFinished(1000)
         process.deleteLater()
 
-    def close_pet_processes(force=False):
+    def close_pet_processes(force=False, wait=True):
         for process in list(pet_window_ref.get("processes", [])):
-            _close_qprocess(process, force)
+            if not wait and isValid(process) and process.state() != QProcess.ProcessState.NotRunning:
+                closing = pet_window_ref.setdefault("closing_processes", [])
+                if process not in closing:
+                    closing.append(process)
+            _close_qprocess(process, force, wait=wait)
         pet_window_ref["processes"] = []
 
     def close_settings_process(force=False):
@@ -862,7 +874,7 @@ def main():
                 group_characters.append(model_char)
                 seen_group_characters.add(model_char)
         group_characters_arg = json.dumps(group_characters, ensure_ascii=False)
-        close_pet_processes()
+        close_pet_processes(wait=False)
         pet_window_ref["processes"] = []
         for idx, model in enumerate(models):
             process = QProcess(app)
@@ -896,6 +908,9 @@ def main():
         processes = pet_window_ref.get("processes", [])
         if process in processes:
             processes.remove(process)
+        closing_processes = pet_window_ref.get("closing_processes", [])
+        if process in closing_processes:
+            closing_processes.remove(process)
         process.deleteLater()
 
     settings_process_ref = {}
