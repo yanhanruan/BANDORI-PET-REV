@@ -3726,9 +3726,6 @@ class ChatWindow(QWidget):
             self._user_memory_key(),
             self._user_name or _tr("ChatWindow.you"),
         )
-        event_context = _build_event_context(character)
-        if event_context:
-            dynamic_context += "\n\n【今日特殊事件 - 必须知晓】\n" + event_context
         unified_history = self._unified_history_context(character) if self._cfg.get("llm_cross_chat_history_enabled", True) else ""
         if unified_history:
             dynamic_context += "\n\n【跨聊天记录】\n" + unified_history
