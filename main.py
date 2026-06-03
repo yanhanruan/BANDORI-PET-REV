@@ -646,6 +646,10 @@ def main():
             broadcast_ipc_line(line)
         elif line.startswith("LAYER_ORDER\t"):
             broadcast_ipc_line(line)
+        elif line.startswith("RADIAL_MENU_OPEN\t"):
+            broadcast_ipc_line(line)
+        elif line.startswith("RADIAL_MENU_CLOSED\t"):
+            broadcast_ipc_line(line)
         elif line == "FOCUS_CHAT":
             broadcast_ipc_line(line, exclude_socket=source_socket)
         elif line.startswith("MODEL\t") or line.startswith("SETTINGS\t") or line == "LAUNCH":
