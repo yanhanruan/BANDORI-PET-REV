@@ -15,7 +15,7 @@ from process_utils import app_base_dir, clamp_int as _clamp_int
 
 BASE_DIR = app_base_dir()
 DB_PATH = os.path.join(BASE_DIR, "data.db")
-_DB_LOCKS: dict[str, threading.RLock] = {}
+_DB_LOCKS: dict[str, "_DatabaseFileLock"] = {}
 _DB_LOCKS_GUARD = threading.Lock()
 
 _REQUIRED_TABLES = {"conversations", "messages", "group_messages"}
@@ -54,6 +54,74 @@ def _json_text(value) -> str:
         return json.dumps(value, ensure_ascii=False)
     except (TypeError, ValueError):
         return ""
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+class _DatabaseFileLock:
+    def __init__(self, db_path: str):
+        self._thread_lock = threading.RLock()
+        self._local = threading.local()
+        lock_path = Path(db_path).resolve().with_suffix(Path(db_path).suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(lock_path, "a+b")
+
+    def __enter__(self):
+        self._thread_lock.acquire()
+        try:
+            depth = getattr(self._local, "depth", 0)
+            if depth == 0:
+                self._lock_file()
+            self._local.depth = depth + 1
+            return self
+        except Exception:
+            self._thread_lock.release()
+            raise
+
+    def __exit__(self, exc_type, exc, tb):
+        depth = getattr(self._local, "depth", 0) - 1
+        try:
+            if depth <= 0:
+                self._local.depth = 0
+                self._unlock_file()
+            else:
+                self._local.depth = depth
+        finally:
+            self._thread_lock.release()
+
+    def _lock_file(self):
+        self._file.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                try:
+                    msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
+                    return
+                except OSError as exc:
+                    if getattr(exc, "errno", None) not in {13, 36}:
+                        raise
+                    time.sleep(0.05)
+        else:
+            import fcntl
+
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
+
+    def _unlock_file(self):
+        self._file.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+
+    def close(self):
+        self._file.close()
 
 
 def _chat_attachment_dir() -> Path:
@@ -477,7 +545,7 @@ def _with_database_lock(method):
         with self._lock:
             try:
                 return method(self, *args, **kwargs)
-            except sqlite3.Error:
+            except Exception:
                 _rollback_quietly(getattr(self, "_conn", None))
                 raise
     return wrapper
@@ -503,12 +571,12 @@ def _rollback_quietly(conn):
         pass
 
 
-def _shared_database_lock(db_path: str) -> threading.RLock:
+def _shared_database_lock(db_path: str) -> _DatabaseFileLock:
     key = str(Path(db_path).resolve())
     with _DB_LOCKS_GUARD:
         lock = _DB_LOCKS.get(key)
         if lock is None:
-            lock = threading.RLock()
+            lock = _DatabaseFileLock(db_path)
             _DB_LOCKS[key] = lock
         return lock
 
@@ -739,7 +807,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
     def assign_legacy_chat_history_user(self, user_key: str) -> int:
         user_key = self._normalize_user_key(user_key)
-        try:
+        def operation():
             conv_cur = self._conn.execute(
                 "UPDATE conversations SET user_key=? WHERE user_key='' OR user_key IS NULL",
                 (user_key,),
@@ -750,11 +818,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             )
             self._conn.commit()
             return int(conv_cur.rowcount or 0) + int(group_cur.rowcount or 0)
-        except sqlite3.OperationalError as exc:
-            if "database is locked" not in str(exc).lower():
-                raise
-            self._conn.rollback()
-            return 0
+
+        return _run_with_locked_retry(self._conn, operation, lock=self._lock)
 
     def get_relationship_state(self, character: str, user_key: str = "") -> dict:
         user_key = self._normalize_user_key(user_key)
@@ -843,32 +908,62 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         reason: str = "",
     ) -> dict:
         user_key = self._normalize_user_key(user_key)
+        self._conn.execute("BEGIN IMMEDIATE")
         current = self.get_relationship_state(character, user_key)
         if mood_intensity is None:
             if mood:
                 mood_intensity = max(25, min(85, current["mood_intensity"] + 8))
             else:
                 mood_intensity = max(10, current["mood_intensity"] - 3)
-        next_state = self.upsert_relationship_state(
-            character,
-            user_key,
-            affection=current["affection"] + affection_delta,
-            trust=current["trust"] + trust_delta,
-            familiarity=current["familiarity"] + familiarity_delta,
-            mood=mood or current["mood"],
-            mood_intensity=mood_intensity,
+
+        now = _now_text()
+        next_values = {
+            "affection": _clamp_int(current["affection"] + affection_delta, 0, 100, 50),
+            "trust": _clamp_int(current["trust"] + trust_delta, 0, 100, 50),
+            "familiarity": _clamp_int(current["familiarity"] + familiarity_delta, 0, 100, 0),
+            "mood": mood or current["mood"] or "calm",
+            "mood_intensity": _clamp_int(mood_intensity, 0, 100, 20),
+            "summary": current["summary"],
+        }
+        self._conn.execute(
+            "INSERT INTO relationship_states "
+            "(character, user_key, affection, trust, familiarity, mood, mood_intensity, summary, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(character, user_key) DO UPDATE SET "
+            "affection=excluded.affection, trust=excluded.trust, familiarity=excluded.familiarity, "
+            "mood=excluded.mood, mood_intensity=excluded.mood_intensity, summary=excluded.summary, "
+            "updated_at=excluded.updated_at",
+            (
+                character,
+                user_key,
+                next_values["affection"],
+                next_values["trust"],
+                next_values["familiarity"],
+                next_values["mood"],
+                next_values["mood_intensity"],
+                next_values["summary"],
+                now,
+            ),
         )
-        self.add_mood_event(
-            character,
-            user_key,
-            event_type=event_type,
-            affection_delta=affection_delta,
-            trust_delta=trust_delta,
-            familiarity_delta=familiarity_delta,
-            mood=mood,
-            mood_intensity=mood_intensity,
-            reason=reason,
+        self._conn.execute(
+            "INSERT INTO mood_events "
+            "(character, user_key, event_type, affection_delta, trust_delta, familiarity_delta, mood, mood_intensity, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                character,
+                user_key,
+                event_type or "interaction",
+                _clamp_int(affection_delta, -100, 100, 0),
+                _clamp_int(trust_delta, -100, 100, 0),
+                _clamp_int(familiarity_delta, -100, 100, 0),
+                mood or "",
+                _clamp_int(mood_intensity, 0, 100, 0),
+                str(reason or "")[:500],
+                now,
+            ),
         )
+        next_state = self.get_relationship_state(character, user_key)
+        self._conn.commit()
         return next_state
 
     def add_character_memory(
@@ -1018,8 +1113,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         if not query:
             return 0
         cur = self._conn.execute(
-            "DELETE FROM character_memories WHERE character=? AND user_key=? AND content LIKE ?",
-            (character, user_key, f"%{query}%"),
+            "DELETE FROM character_memories WHERE character=? AND user_key=? AND content LIKE ? ESCAPE '\\'",
+            (character, user_key, f"%{_escape_like(query)}%"),
         )
         self._conn.commit()
         return int(cur.rowcount or 0)
@@ -1257,12 +1352,17 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             where += " AND user_key=?"
             params = (group_key, user_filter)
         rows = self._conn.execute(
-            "SELECT conversation_id, user_key, id, role, content, created_at FROM group_messages "
-            f"{where} ORDER BY id DESC",
+            "SELECT g.conversation_id, g.user_key, g.id, g.role, g.content, g.created_at "
+            "FROM group_messages g "
+            "JOIN ("
+            "SELECT conversation_id, MAX(id) AS latest_id FROM group_messages "
+            f"{where} AND role IN ('user', 'assistant', 'system') "
+            "GROUP BY conversation_id"
+            ") latest ON g.id=latest.latest_id "
+            "ORDER BY latest.latest_id DESC",
             params,
         ).fetchall()
         result = []
-        seen = set()
         for conversation_id, row_user_key, msg_id, role, content, created_at in rows:
             conversation_id = _db_text(conversation_id, "default") or "default"
             if _db_text(role).strip() not in _VALID_MESSAGE_ROLES:
@@ -1270,9 +1370,6 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             msg_id = _db_int(msg_id)
             if msg_id is None:
                 continue
-            if conversation_id in seen:
-                continue
-            seen.add(conversation_id)
             result.append({
                 "group_key": group_key,
                 "conversation_id": conversation_id,
@@ -1292,12 +1389,18 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             where = "WHERE user_key=?"
             params = (user_filter,)
         rows = self._conn.execute(
-            "SELECT group_key, conversation_id, user_key, id, role, content, created_at FROM group_messages "
-            f"{where} ORDER BY id DESC",
+            "SELECT g.group_key, g.conversation_id, g.user_key, g.id, g.role, g.content, g.created_at "
+            "FROM group_messages g "
+            "JOIN ("
+            "SELECT group_key, MAX(id) AS latest_id FROM group_messages "
+            f"{where} "
+            f"{'AND' if where else 'WHERE'} role IN ('user', 'assistant', 'system') "
+            "GROUP BY group_key"
+            ") latest ON g.id=latest.latest_id "
+            "ORDER BY latest.latest_id DESC",
             params,
         ).fetchall()
         result = []
-        seen = set()
         for group_key, conversation_id, row_user_key, msg_id, role, content, created_at in rows:
             group_key = _db_text(group_key)
             conversation_id = _db_text(conversation_id, "default") or "default"
@@ -1306,9 +1409,6 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             msg_id = _db_int(msg_id)
             if msg_id is None:
                 continue
-            if group_key in seen:
-                continue
-            seen.add(group_key)
             result.append({
                 "group_key": group_key,
                 "conversation_id": conversation_id,
@@ -1350,7 +1450,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
     def delete_empty_conversations(self, character: str = "", user_key: str | None = None):
         user_filter = self._normalize_user_key(user_key) if user_key is not None else None
-        try:
+        def operation():
             if character:
                 where = "character=?"
                 params: tuple = (character,)
@@ -1370,10 +1470,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     ")"
                 )
             self._conn.commit()
-        except sqlite3.OperationalError as exc:
-            if "database is locked" not in str(exc).lower():
-                raise
-            self._conn.rollback()
+
+        _run_with_locked_retry(self._conn, operation, lock=self._lock)
 
     def add_external_chat_message(self, event: dict) -> dict:
         if not isinstance(event, dict):
@@ -1634,7 +1732,12 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             "unread_count=(SELECT COUNT(*) FROM external_chat_messages m "
             "WHERE m.platform=external_chat_threads.platform AND m.thread_id=external_chat_threads.thread_id AND m.unread=1), "
             "last_message_id=(SELECT MAX(m.id) FROM external_chat_messages m "
-            "WHERE m.platform=external_chat_threads.platform AND m.thread_id=external_chat_threads.thread_id)"
+            "WHERE m.platform=external_chat_threads.platform AND m.thread_id=external_chat_threads.thread_id), "
+            "last_message_at=(SELECT m.created_at FROM external_chat_messages m "
+            "WHERE m.platform=external_chat_threads.platform AND m.thread_id=external_chat_threads.thread_id "
+            "ORDER BY m.id DESC LIMIT 1), "
+            "updated_at=?",
+            (_now_text(),)
         )
 
     def _prune_external_group_thread_messages(self, platform: str, thread_id: str) -> int:
