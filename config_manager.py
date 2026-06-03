@@ -2,6 +2,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from app_theme import BANDORI_PRIMARY
@@ -738,10 +739,11 @@ class ConfigManager:
                 f.flush()
                 os.fsync(f.fileno())
             last_error = None
-            for attempt in range(3):
+            for attempt in range(25):
                 last_error = _try_replace_file(tmp_path, self._path)
                 if last_error is None:
                     return
+                time.sleep(min(0.02 * (attempt + 1), 0.2))
             if last_error is not None:
                 raise last_error
         except Exception:
