@@ -233,6 +233,7 @@ class PetWindow(QWidget):
         self._move_all_roles_together = bool(
             config_manager.get("move_all_roles_together", False)
         )
+        self._user_hidden_live2d_model = False
         self._peer_window_positions = {}  # {character: (x, y)}
         self._peer_pos_broadcast_timer = QTimer(self)
         self._peer_pos_broadcast_timer.setInterval(200)
@@ -1014,11 +1015,13 @@ class PetWindow(QWidget):
         self._apply_game_topmost_state()
 
     def set_hide_live2d_model(self, enabled: bool):
+        was_config_hidden = self._hide_live2d_model
         self._hide_live2d_model = bool(enabled)
         if self._hide_live2d_model:
+            self._user_hidden_live2d_model = False
             if self.isVisible():
                 self.hide()
-        elif not self.isVisible():
+        elif was_config_hidden and not self._user_hidden_live2d_model and not self.isVisible():
             self.show()
 
     def set_live2d_idle_actions_enabled(self, enabled: bool):
@@ -1815,6 +1818,8 @@ class PetWindow(QWidget):
             self._cfg.save()
         if "compact_ai_window_enabled" in data:
             self._compact_ai_window_enabled = bool(data["compact_ai_window_enabled"])
+            if not self._compact_ai_window_enabled:
+                self._close_compact_ai_window()
         if "ai_event_overlay_enabled" in data:
             self._ai_event_overlay_enabled = bool(data["ai_event_overlay_enabled"])
         if "chat_integration_overlay_enabled" in data:
@@ -2579,6 +2584,8 @@ class PetWindow(QWidget):
         if action:
             self._on_chat_action(action)
 
+        if not self._compact_ai_window_enabled:
+            return
         if not self.isVisible():
             return
         should_position = (
@@ -2691,7 +2698,7 @@ class PetWindow(QWidget):
         force_visible: bool = False,
         reposition: bool = True,
     ):
-        if not (self._compact_ai_window_enabled or force_visible) or not self.isVisible():
+        if not self._compact_ai_window_enabled or not self.isVisible():
             if self._compact_ai_window is not None:
                 self._compact_ai_window.hide()
             return
@@ -3270,8 +3277,10 @@ class PetWindow(QWidget):
 
     def _toggle_visible(self):
         if self.isVisible():
+            self._user_hidden_live2d_model = True
             self.hide()
         else:
+            self._user_hidden_live2d_model = False
             self._hide_live2d_model = False
             if self._cfg:
                 self._cfg.load()
