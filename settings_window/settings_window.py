@@ -2705,7 +2705,11 @@ class SettingsWindow(
             self._cfg.set("auto_start", settings["auto_start"])
             self._cfg.set("live2d_quality", settings["live2d_quality"])
             self._cfg.set("live2d_scale", settings["live2d_scale"])
-            self._cfg.save()
+            try:
+                self._cfg.save()
+            except Exception:
+                import traceback
+                traceback.print_exc()
         self.settings_changed.emit(settings)
         if self._current_char and self._selected_costume:
             self.model_selected.emit(self._current_char, self._selected_costume)
@@ -2875,7 +2879,11 @@ class SettingsWindow(
             self._cfg.set("character", "")
             self._cfg.set("costume", "")
         self._cfg.set("models", [dict(item) for item in self._configured_models])
-        self._cfg.save()
+        try:
+            self._cfg.save()
+        except Exception:
+            import traceback
+            traceback.print_exc()
         self.settings_changed.emit({
             "models": [dict(item) for item in self._configured_models],
             "model_action_settings": self._cfg.get("model_action_settings", {}),
