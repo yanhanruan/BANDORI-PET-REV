@@ -335,6 +335,7 @@ class CompactPageMixin:
             self._cfg.save()
             if emit_update:
                 self.settings_changed.emit(self._compact_window_settings_data())
+            self._compact_window_reset_position_pending = False
             if show_info:
                 InfoBar.success(
                     _tr("SettingsWindow.compact_window_saved_title"),

@@ -171,4 +171,8 @@ class QualityPageMixin:
         self._set_live2d_scale_controls(value)
 
     def _on_live2d_scale_input_finished(self):
-        self._set_live2d_scale_controls(self._live2d_scale_input.text())
+        try:
+            value = int(self._live2d_scale_input.text())
+        except (TypeError, ValueError):
+            value = self._live2d_scale
+        self._set_live2d_scale_controls(value)

@@ -342,8 +342,7 @@ def run_off_gui_thread(fn):
             done.set()
 
     threading.Thread(target=worker, daemon=True).start()
-    while not done.wait(0.02):
-        app.processEvents()
+    done.wait()
     if "error" in result:
         raise result["error"]
     return result.get("value")

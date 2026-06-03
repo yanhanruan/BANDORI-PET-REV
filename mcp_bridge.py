@@ -545,6 +545,35 @@ class StdioMcpClient:
         result = self._request("tools/call", {"name": name, "arguments": arguments})
         return _mcp_result_text(result)
 
+    def close(self):
+        with self._lock:
+            process = self._process
+            for stream in (process.stdin, process.stdout):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except Exception:
+                    pass
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _initialize(self):
         if self._initialized:
             return

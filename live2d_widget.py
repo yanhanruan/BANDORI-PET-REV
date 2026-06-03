@@ -344,6 +344,9 @@ class Live2DWidget(QOpenGLWidget):
             if self._custom_hit_areas is not None:
                 self._custom_hit_areas.clear()
             self._update_render_timer()
+        finally:
+            if self._pending_model == model_json_path:
+                self._pending_model = ""
 
     def _prepare_custom_hit_areas(self, model):
         areas = model.modelSetting.getCustomHitAreas()
@@ -672,9 +675,16 @@ class Live2DWidget(QOpenGLWidget):
         gl.glClearColor(*self._clear_color)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_STENCIL_BUFFER_BIT)
 
-        self._apply_lip_sync()
-        draw_start = self._perf_probe.now()
-        self._model.Draw()
+        try:
+            self._apply_lip_sync()
+            draw_start = self._perf_probe.now()
+            self._model.Draw()
+        except Exception as exc:
+            print(f"Live2D draw failed: {exc}", file=sys.stderr)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.defaultFramebufferObject())
+            gl.glDisable(gl.GL_DEPTH_TEST)
+            gl.glEnable(gl.GL_BLEND)
+            return
         if self._perf_probe.enabled:
             draw_elapsed = self._perf_probe.now() - draw_start
             self._perf_probe.add("draw_py", draw_elapsed)

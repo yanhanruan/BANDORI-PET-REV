@@ -1092,6 +1092,15 @@ def _messages_to_responses_input(messages: list[dict]) -> tuple[str, list[dict]]
             text = _content_to_text(content)
             instructions = (instructions + "\n\n" + text).strip() if instructions else text
             continue
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or message.get("call_id") or "").strip()
+            if call_id:
+                input_items.append({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": _content_to_text(content),
+                })
+            continue
         if role not in ("user", "assistant", "developer"):
             role = "user"
         input_items.append({"role": role, "content": content})

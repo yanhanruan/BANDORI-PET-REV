@@ -209,7 +209,11 @@ class ModelManager:
     def _parse_outfit_json(self):
         if not OUTFIT_JSON.exists():
             return
-        data = json.loads(OUTFIT_JSON.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(OUTFIT_JSON.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            print(f"Failed to parse outfit.json: {exc}")
+            return
         chars = data.get("characters", {})
         for key, info in chars.items():
             self._characters.setdefault(key, {})
@@ -221,8 +225,12 @@ class ModelManager:
 
     def _parse_band_json(self):
         if BAND_JSON.exists():
-            data = json.loads(BAND_JSON.read_text(encoding="utf-8"))
-            configured_bands = data.get("bands", [])
+            try:
+                data = json.loads(BAND_JSON.read_text(encoding="utf-8"))
+                configured_bands = data.get("bands", [])
+            except (json.JSONDecodeError, OSError, ValueError) as exc:
+                print(f"Failed to parse band.json: {exc}")
+                configured_bands = []
         else:
             configured_bands = []
 

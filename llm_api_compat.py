@@ -26,7 +26,7 @@ def chat_completions_api_url(api_url: str) -> str:
     path = parts.path.rstrip("/")
     if path.endswith("/v1"):
         return urlunsplit((parts.scheme, parts.netloc, path + "/chat/completions", parts.query, parts.fragment))
-    return url
+    return url + "/chat/completions"
 
 
 def responses_api_url(api_url: str) -> str:

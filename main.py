@@ -568,7 +568,6 @@ def main():
         def _on_timeout():
             if isValid(worker) and worker.isRunning():
                 worker.requestInterruption()
-                _cleanup(delete_later=False)
 
         def _on_destroyed():
             with napcat_ref["lock"]:

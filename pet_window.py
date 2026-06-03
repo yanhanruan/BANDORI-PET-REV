@@ -276,7 +276,8 @@ class PetWindow(QWidget):
         self._radial_menu_prewarm_timer.setInterval(1200)
         self._radial_menu_prewarm_timer.timeout.connect(self._ensure_radial_menu_process)
         self._radial_menu_socket.connected.connect(self._flush_radial_menu_commands)
-        self._radial_menu_socket.errorOccurred.connect(lambda _error: None)
+        self._radial_menu_socket.disconnected.connect(self._on_radial_menu_socket_disconnected)
+        self._radial_menu_socket.errorOccurred.connect(self._on_radial_menu_socket_error)
         self._compact_ai_window = None
         self._compact_ai_bounds_cache = None
         self._compact_ai_drag_bounds = None
@@ -826,6 +827,10 @@ class PetWindow(QWidget):
         if self._layer_index == 0:
             self._enforce_windows_z_order(force=force)
             return
+        if self._current_char not in self._group_characters:
+            self._layer_index = self._compute_layer_index()
+            self._enforce_windows_z_order(force=force)
+            return
         self._group_characters.remove(self._current_char)
         self._group_characters.insert(0, self._current_char)
         self._layer_index = self._compute_layer_index()
@@ -1107,12 +1112,16 @@ class PetWindow(QWidget):
             return
         if dx == 0 and dy == 0:
             return
+        screen = self._screen_for_current_window() or self._fallback_position_screen()
+        target_x, target_y = self._constrain_position_to_screen(self.x() + dx, self.y() + dy, screen)
+        actual_dx = target_x - self.x()
+        actual_dy = target_y - self.y()
         self._suppress_compact_ai_sync = True
         try:
-            self._move_unconstrained(self.x() + dx, self.y() + dy)
+            self._move_unconstrained(target_x, target_y)
         finally:
             self._suppress_compact_ai_sync = False
-        self._move_compact_ai_with_pet(dx, dy)
+        self._move_compact_ai_with_pet(actual_dx, actual_dy)
 
     def _update_mutual_gaze(self):
         """更新对视状态，让角色看向最近的另一个角色"""
@@ -1588,9 +1597,12 @@ class PetWindow(QWidget):
             self._live2d_prewarmed_motions.add(str(motion_name))
             return True
         except Exception:
-            model.StartMotion(motion_name, 0, priority, **kwargs)
-            self._live2d_prewarmed_motions.add(str(motion_name))
-            return True
+            try:
+                model.StartMotion(motion_name, 0, priority, **kwargs)
+                self._live2d_prewarmed_motions.add(str(motion_name))
+                return True
+            except Exception:
+                return False
 
     def _start_context_idle_behavior(self, kind: str) -> bool:
         if not self._live2d_idle_actions_enabled:
@@ -1617,7 +1629,7 @@ class PetWindow(QWidget):
             started = self._safe_start_motion(
                 model, motion,
                 priority=self._live2d.MotionPriority.FORCE,
-                on_finish=self._on_motion_finished,
+                on_finish=lambda *args, t=token: self._on_motion_finished(t, *args),
             )
             if started:
                 QTimer.singleShot(9000, lambda t=token: self._clear_motion_if_current(t))
@@ -1898,6 +1910,13 @@ class PetWindow(QWidget):
     def _on_drag(self, dx: int, dy: int):
         self._note_user_interaction()
         self._refresh_topmost_for_interaction()
+        if self._emotion_window_anim is not None:
+            try:
+                self._emotion_window_anim.stop()
+            except RuntimeError:
+                pass
+            self._emotion_window_anim = None
+        self._emotion_window_animating = False
         self._suppress_compact_ai_sync = True
         try:
             self._move_unconstrained(self.x() + dx, self.y() + dy)
@@ -2210,6 +2229,15 @@ class PetWindow(QWidget):
             self._radial_menu_socket.write((line + "\n").encode("utf-8"))
         self._radial_menu_socket.flush()
 
+    def _on_radial_menu_socket_disconnected(self):
+        self._radial_menu_visible = False
+        self._tick_windows_mouse_passthrough()
+
+    def _on_radial_menu_socket_error(self, error):
+        self._radial_menu_visible = False
+        self._tick_windows_mouse_passthrough()
+        print(f"Radial menu socket error: {error}", file=sys.stderr)
+
     def _close_radial_menu_process(self, force: bool = False):
         self._radial_menu_prewarm_timer.stop()
         if self._radial_menu_socket.state() == QLocalSocket.LocalSocketState.ConnectedState:
@@ -2220,18 +2248,27 @@ class PetWindow(QWidget):
         process = self._radial_menu_process
         if process is None:
             return
-        if process.state() != QProcess.ProcessState.NotRunning:
-            process.terminate()
-            if force and not process.waitForFinished(300):
-                process.kill()
-                process.waitForFinished(300)
         if self._radial_menu_process is process:
             self._radial_menu_process = None
             self._radial_menu_buffer = ""
             self._radial_menu_server_name = ""
             self._radial_menu_command_queue.clear()
             self._radial_menu_visible = False
-        process.deleteLater()
+        self._terminate_process_async(process, kill_delay_ms=300 if force else 1000)
+
+    def _terminate_process_async(self, process: QProcess, *, kill_delay_ms: int = 1000):
+        if process.state() == QProcess.ProcessState.NotRunning:
+            process.deleteLater()
+            return
+        try:
+            process.finished.connect(process.deleteLater)
+        except (RuntimeError, TypeError):
+            pass
+        process.terminate()
+        QTimer.singleShot(
+            max(0, int(kill_delay_ms)),
+            lambda p=process: p.kill() if p.state() != QProcess.ProcessState.NotRunning else None,
+        )
 
     def _read_radial_menu_process_output(self, process: QProcess):
         data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
@@ -2566,12 +2603,9 @@ class PetWindow(QWidget):
         except (RuntimeError, TypeError):
             pass
         if p.state() != QProcess.ProcessState.NotRunning:
-            p.terminate()
-            if not p.waitForFinished(1000):
-                p.kill()
-                p.waitForFinished(1000)
-        p.setParent(None)
-        p.deleteLater()
+            self._terminate_process_async(p)
+        else:
+            p.deleteLater()
         self._chat_process = None
 
     def _close_compact_ai_window(self):
@@ -2586,12 +2620,10 @@ class PetWindow(QWidget):
         if process is None:
             return
         if process.state() != QProcess.ProcessState.NotRunning:
-            process.terminate()
-            if not process.waitForFinished(1000):
-                process.kill()
-                process.waitForFinished(1000)
+            self._terminate_process_async(process)
+        else:
+            process.deleteLater()
         self._settings_process = None
-        process.deleteLater()
 
     def _ensure_compact_ai_window(self):
         if self._compact_ai_window is None:
@@ -2724,7 +2756,7 @@ class PetWindow(QWidget):
                     model,
                     motion,
                     priority=self._live2d.MotionPriority.FORCE,
-                    on_finish=self._on_motion_finished,
+                    on_finish=lambda *args, t=token: self._on_motion_finished(t, *args),
                 ):
                     hold_ms = 2600 + int(intensity * 54)
                     QTimer.singleShot(hold_ms, lambda t=token: self._clear_motion_if_current(t))
@@ -2963,7 +2995,7 @@ class PetWindow(QWidget):
             motion_started = self._safe_start_motion(
                 model, motion,
                 priority=self._live2d.MotionPriority.FORCE,
-                on_finish=self._on_motion_finished,
+                on_finish=lambda *args, t=token: self._on_motion_finished(t, *args),
             )
             if motion_started:
                 QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
@@ -2974,7 +3006,7 @@ class PetWindow(QWidget):
                     token = self._motion_guard_token
                     model.StartRandomMotion(
                         priority=self._live2d.MotionPriority.FORCE,
-                        onFinishMotionHandler=self._on_motion_finished,
+                        onFinishMotionHandler=lambda *args, t=token: self._on_motion_finished(t, *args),
                     )
                     motion_started = True
                     QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
@@ -3006,14 +3038,16 @@ class PetWindow(QWidget):
             token = self._motion_guard_token
             model.StartRandomMotion(
                 priority=self._live2d.MotionPriority.FORCE,
-                onFinishMotionHandler=self._on_motion_finished,
+                onFinishMotionHandler=lambda *args, t=token: self._on_motion_finished(t, *args),
             )
             QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
             QTimer.singleShot(1800, lambda t=token: self._restore_default_if_finished(t))
         except Exception:
             pass
 
-    def _on_motion_finished(self, *_args):
+    def _on_motion_finished(self, token=None, *_args):
+        if token is not None and token != self._motion_guard_token:
+            return
         self._motion_guard_token += 1
         QTimer.singleShot(0, lambda t=self._motion_guard_token: self._restore_default_motion(t, force_clear=False))
 

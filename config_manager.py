@@ -2,7 +2,7 @@ import json
 import os
 import re
 import tempfile
-import time
+from datetime import datetime
 from pathlib import Path
 from app_theme import BANDORI_PRIMARY
 from live2d_click_actions import normalize_click_motion_actions
@@ -444,7 +444,7 @@ class ConfigManager:
                     if k in loaded:
                         self._data[k] = loaded[k]
             except (json.JSONDecodeError, OSError, ValueError):
-                pass
+                self._backup_corrupt_config()
         if loaded is None or not has_action_settings:
             self._data["model_action_settings"] = {}
         self._normalize_model_action_settings()
@@ -484,6 +484,16 @@ class ConfigManager:
         )
         if self._data.get("user_avatar_color") == "#2aabee":
             self._data["user_avatar_color"] = BANDORI_PRIMARY
+
+    def _backup_corrupt_config(self):
+        if not self._path.exists():
+            return
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = self._path.with_name(f"{self._path.name}.corrupt-{timestamp}.bak")
+        try:
+            self._path.replace(backup)
+        except OSError:
+            pass
 
     def _normalize_user_profiles(self):
         raw_profiles = self._data.get("user_profiles", [])
@@ -732,8 +742,6 @@ class ConfigManager:
                 last_error = _try_replace_file(tmp_path, self._path)
                 if last_error is None:
                     return
-                if attempt < 2:
-                    time.sleep(0.1 * (attempt + 1))
             if last_error is not None:
                 raise last_error
         except Exception:

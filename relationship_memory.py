@@ -281,14 +281,16 @@ def _json_object_from_text(text: str) -> dict:
     try:
         data = json.loads(source)
     except (TypeError, ValueError):
-        match = re.search(r"\{.*\}", source, flags=re.DOTALL)
-        if match:
+        data = {}
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"\{", source):
             try:
-                data = json.loads(match.group(0))
+                candidate, _end = decoder.raw_decode(source[match.start():])
             except (TypeError, ValueError):
-                data = {}
-        else:
-            data = {}
+                continue
+            if isinstance(candidate, dict):
+                data = candidate
+                break
     return data if isinstance(data, dict) else {}
 
 

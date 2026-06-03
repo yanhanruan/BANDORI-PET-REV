@@ -377,8 +377,17 @@ class LuaLive2DModule:
         self._drag = None
         self._hit_test = None
         self._set_parameter = None
+        self._set_offset = None
         self._apply_texture_quality = None
         self._model_info = None
+        self._start_motion = None
+        self._clear_motions = None
+        self._is_motion_finished = None
+        self._set_expression = None
+        self._preload_expression = None
+        self._preload_motion_group = None
+        self._reset_expression = None
+        self._dispose_renderer = None
         self.MotionPriority = MotionPriority
 
     def glInit(self):
@@ -406,6 +415,7 @@ class LuaLive2DModule:
         self._preload_expression = None
         self._preload_motion_group = None
         self._reset_expression = None
+        self._dispose_renderer = None
         self._lua = None
         self._embed = None
         self._initialized = False
@@ -525,6 +535,7 @@ class LuaLive2DModule:
             b"function(renderer, name) return renderer:preload_motion_group(name) end"
         )
         self._reset_expression = lua.eval(b"function(renderer) return renderer:reset_expression() end")
+        self._dispose_renderer = lua.eval(b"function(renderer) return renderer:dispose() end")
         self._lua = lua
         self._initialized = True
 
@@ -587,6 +598,7 @@ class LuaLAppModel:
 
     def LoadModelJson(self, model_json_path: str, disable_precision=False):
         del disable_precision
+        self._dispose_renderer()
         self._renderer = self._module._new_renderer(self._width, self._height)
         opts = self._module._new_options(model_json_path)
         self._module._load_model(
@@ -633,16 +645,22 @@ class LuaLAppModel:
             self.last_lua_gc_seconds = float(opts[b"profile_gc_seconds"] or 0.0)
 
     def Drag(self, x: float, y: float):
+        if self._renderer is None:
+            return
         self._module._drag(self._renderer, float(x), float(y))
 
     def SetParameterValue(self, param_id: str, value: float, weight: float = 1.0):
         self._pending_parameters[str(param_id)] = (str(param_id), float(value), float(weight))
 
     def HitTest(self, _area_name: str, x: float, y: float):
+        if self._renderer is None:
+            return None
         hits = self._module._hit_test(self._renderer, float(x), float(y))
         return "hit" if len(hits) > 0 else None
 
     def StartMotion(self, name: str, no: int = 0, priority=MotionPriority.FORCE, **_kwargs):
+        if self._renderer is None:
+            return
         resolved = self.modelSetting.resolveMotion(str(name), int(no)) if self.modelSetting else None
         if resolved is None:
             return
@@ -678,16 +696,33 @@ class LuaLAppModel:
         self._module._preload_expression(self._renderer, str(name).encode("utf-8"))
 
     def ClearMotions(self):
+        if self._renderer is None:
+            return
         self._module._clear_motions(self._renderer)
 
     def IsMotionFinished(self) -> bool:
+        if self._renderer is None:
+            return True
         return bool(self._module._is_motion_finished(self._renderer))
 
     def SetExpression(self, name: str):
+        if self._renderer is None:
+            return
         self._module._set_expression(self._renderer, str(name).encode("utf-8"))
 
     def ResetExpression(self):
+        if self._renderer is None:
+            return
         self._module._reset_expression(self._renderer)
+
+    def _dispose_renderer(self):
+        if self._renderer is None or self._module._dispose_renderer is None:
+            self._renderer = None
+            return
+        try:
+            self._module._dispose_renderer(self._renderer)
+        finally:
+            self._renderer = None
 
     @staticmethod
     def _read_expression_names(info) -> dict[str, None]:

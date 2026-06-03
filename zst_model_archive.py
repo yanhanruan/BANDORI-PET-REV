@@ -280,8 +280,11 @@ def list_archive_files(archive_path: Path | str) -> list[str]:
             if first.isfile() and first_name == INDEX_MEMBER:
                 extracted = archive.extractfile(first)
                 if extracted is not None:
-                    data = json.loads(_read_member_bytes(extracted, first, _INDEX_MEMBER_MAX_BYTES).decode("utf-8"))
-                    indexed_files = data.get("files", [])
+                    try:
+                        data = json.loads(_read_member_bytes(extracted, first, _INDEX_MEMBER_MAX_BYTES).decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                        data = {}
+                    indexed_files = data.get("files", []) if isinstance(data, dict) else []
                     if isinstance(indexed_files, list):
                         files = [name for name in (_safe_normalize_member(path) for path in indexed_files) if name]
                         return sorted(files)

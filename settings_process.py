@@ -71,19 +71,25 @@ def main():
     apply_app_theme(cfg.get("dark_theme", False))
 
     ipc_socket = QLocalSocket(app)
+    ipc_queue = []
     ipc_socket.connectToServer(ipc_server_name())
+
+    def flush_ipc_queue():
+        if ipc_socket.state() != QLocalSocket.LocalSocketState.ConnectedState:
+            return
+        while ipc_queue:
+            ipc_socket.write((ipc_queue.pop(0) + "\n").encode("utf-8"))
+        ipc_socket.flush()
+
+    ipc_socket.connected.connect(flush_ipc_queue)
 
     def send_ipc_line(line: str):
         if line.startswith("MODEL\t") and args.show_launch == "0":
             line += "\tRELAUNCH"
+        ipc_queue.append(line)
         if ipc_socket.state() == QLocalSocket.LocalSocketState.UnconnectedState:
             ipc_socket.connectToServer(ipc_server_name())
-        if ipc_socket.state() != QLocalSocket.LocalSocketState.ConnectedState:
-            ipc_socket.waitForConnected(200)
-        if ipc_socket.state() == QLocalSocket.LocalSocketState.ConnectedState:
-            ipc_socket.write((line + "\n").encode("utf-8"))
-            ipc_socket.flush()
-            ipc_socket.waitForBytesWritten(200)
+        flush_ipc_queue()
 
     mgr = ModelManager()
     window = SettingsWindow(

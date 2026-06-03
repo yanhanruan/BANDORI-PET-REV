@@ -4,6 +4,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -23,6 +24,7 @@ ASR_LOCAL_MODEL = "Systran/faster-whisper-small"
 ASR_LOCAL_DEVICE = "cpu"
 ASR_LOCAL_COMPUTE_TYPE = "int8"
 _LOCAL_ASR_PROCESS = None
+_LOCAL_ASR_LOCK = threading.Lock()
 
 
 _LOCAL_ASR_REQUIREMENTS = """fastapi
@@ -186,6 +188,12 @@ def _tail_local_asr_log(max_chars: int = 1800) -> str:
 
 def _launch_local_asr_server() -> tuple[bool, str]:
     global _LOCAL_ASR_PROCESS
+    with _LOCAL_ASR_LOCK:
+        return _launch_local_asr_server_locked()
+
+
+def _launch_local_asr_server_locked() -> tuple[bool, str]:
+    global _LOCAL_ASR_PROCESS
     host, port = _local_asr_runtime_endpoint()
     connect_host = _local_asr_connect_host(host)
     if _is_local_asr_port_open(connect_host, port):
@@ -205,15 +213,18 @@ def _launch_local_asr_server() -> tuple[bool, str]:
     creationflags = 0
     if sys.platform == "win32":
         creationflags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-    _LOCAL_ASR_PROCESS = subprocess.Popen(
-        [str(python), str(server)],
-        cwd=str(ASR_LOCAL_SERVER_DIR),
-        env=env,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        creationflags=creationflags,
-    )
+    try:
+        _LOCAL_ASR_PROCESS = subprocess.Popen(
+            [str(python), str(server)],
+            cwd=str(ASR_LOCAL_SERVER_DIR),
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+    finally:
+        log.close()
     for _ in range(80):
         if _is_local_asr_port_open(connect_host, port, timeout=0.15):
             return True, "ASR local server is ready."

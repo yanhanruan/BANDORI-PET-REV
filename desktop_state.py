@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.wintypes as wintypes
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
+
+if sys.platform == "win32":
+    import ctypes.wintypes as wintypes
+else:
+    wintypes = None
 
 
 DEFAULT_IDLE_SECONDS = 180

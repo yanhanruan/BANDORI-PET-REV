@@ -157,6 +157,7 @@ def main():
     window.closed.connect(app.quit)
 
     shutdown_socket = QLocalSocket(app)
+    shutdown_buffer = {"text": ""}
 
     def focus_window():
         if window.isMinimized():
@@ -167,7 +168,13 @@ def main():
         window.activateWindow()
 
     def read_shutdown_messages():
-        for line in bytes(shutdown_socket.readAll()).decode("utf-8", errors="ignore").splitlines():
+        shutdown_buffer["text"] += bytes(shutdown_socket.readAll()).decode("utf-8", errors="ignore")
+        lines = shutdown_buffer["text"].splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            shutdown_buffer["text"] = lines.pop()
+        else:
+            shutdown_buffer["text"] = ""
+        for line in (item.rstrip("\r\n") for item in lines):
             if line == "SHUTDOWN":
                 window.close()
                 break
@@ -191,8 +198,6 @@ def main():
         window.position_next_to_pet(QRect(args.pet_x, args.pet_y, args.pet_w, args.pet_h))
 
     ret = app.exec()
-    cfg.load()
-    cfg.save()
     chat_lock.unlock()
     return ret
 

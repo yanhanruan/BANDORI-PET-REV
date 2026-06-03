@@ -1,7 +1,9 @@
 import ctypes
-import ctypes.wintypes
 import os
 import sys
+
+if sys.platform == "win32":
+    import ctypes.wintypes
 
 from PySide6.QtCore import QEvent, QEasingCurve, QObject, QPoint, QPropertyAnimation, Qt, QTimer, Signal, QRect, QRectF
 from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPen, QBrush
@@ -552,8 +554,6 @@ class CompactAIWindow(SingleShotTTSCallbacksMixin, QWidget):
 
     def _drag_targets(self) -> tuple[QObject, ...]:
         targets = [self]
-        if self._output is not None:
-            targets.append(self._output.viewport())
         if self._input_shell is not None:
             targets.append(self._input_shell)
         return tuple(targets)
