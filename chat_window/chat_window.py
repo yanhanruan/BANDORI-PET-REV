@@ -599,9 +599,14 @@ class ChatWindow(QWidget):
         self._apply_windows_11_border_fix()
         if macos_patch is not None and not self._normal_window_mode:
             QTimer.singleShot(0, lambda: macos_patch.apply_floating_tool_window_polish(self))
+        self._schedule_visible_message_relayout()
         if not hasattr(self, '_entrance_done'):
             self._entrance_done = True
             QTimer.singleShot(0, self._play_entrance)
+
+    def _schedule_visible_message_relayout(self):
+        QTimer.singleShot(0, self._relayout_message_bubbles)
+        QTimer.singleShot(80, self._relayout_message_bubbles)
 
     def _apply_windows_11_border_fix(self):
         if self._normal_window_mode:
@@ -2782,7 +2787,9 @@ class ChatWindow(QWidget):
             self._msg_layout.addWidget(bubble)
         self._msg_layout.addStretch()
         self._relayout_message_bubbles()
+        self._schedule_visible_message_relayout()
         QTimer.singleShot(50, self._scroll_to_bottom)
+        QTimer.singleShot(120, self._scroll_to_bottom)
 
     def _message_author(self, content: str) -> str:
         if self._is_group_chat:
