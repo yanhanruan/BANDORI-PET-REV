@@ -9,7 +9,7 @@ class LLMPageMixin:
         page = self._make_theme_widget(QWidget())
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 10, 0)
-        layout.setSpacing(16)
+        layout.setSpacing(8)
 
         title = TitleLabel(_tr("SettingsWindow.llm_title"), page)
         layout.addWidget(title)
@@ -19,6 +19,7 @@ class LLMPageMixin:
             "SettingsWindow.llm_capability_hint",
             default="提示：图片理解、联网搜索、MCP 和 Computer Use 等能力，只有在当前模型支持多模态输入或工具调用时才会实际生效。",
         ), page))
+        capability_hint.setObjectName("llmHint")
         layout.addWidget(capability_hint)
 
         profile_header = QHBoxLayout()
@@ -65,6 +66,7 @@ class LLMPageMixin:
         api_url_input_col.setSpacing(4)
         api_url_input_col.addWidget(self._llm_api_url)
         self._llm_api_url_hint = _wrap_label(BodyLabel(_tr("SettingsWindow.llm_api_url_hint"), page))
+        self._llm_api_url_hint.setObjectName("llmHint")
         api_url_input_col.addWidget(self._llm_api_url_hint)
         layout.addLayout(api_url_input_col)
 
@@ -221,7 +223,6 @@ class LLMPageMixin:
         web_search_sources_row.setContentsMargins(0, 0, 0, 0)
         sources_label = BodyLabel(_tr("SettingsWindow.llm_web_search_show_sources", default="显示联网来源"), page)
         self._llm_web_search_show_sources = SwitchButton(page)
-        web_search_sources_row.addSpacing(16)
         web_search_sources_row.addWidget(sources_label)
         web_search_sources_row.addStretch()
         web_search_sources_row.addWidget(self._llm_web_search_show_sources)
@@ -235,10 +236,12 @@ class LLMPageMixin:
         web_fetch_row.addStretch()
         web_fetch_row.addWidget(self._llm_web_fetch_enabled)
         layout.addLayout(web_fetch_row)
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        web_fetch_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_web_fetch_hint",
             default="开启后，模型可以读取用户提供的网页链接；同时开启联网搜索时，也可以进一步读取搜索结果里的网页。",
-        ), page)))
+        ), page))
+        web_fetch_hint.setObjectName("llmHint")
+        layout.addWidget(web_fetch_hint)
 
         auto_continue_row = QHBoxLayout()
         auto_continue_row.setContentsMargins(0, 0, 0, 0)
@@ -266,10 +269,12 @@ class LLMPageMixin:
         auto_continue_limit_row.addStretch()
         auto_continue_limit_row.addWidget(self._llm_auto_continue_max_turns)
         layout.addLayout(auto_continue_limit_row)
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        auto_continue_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_auto_continue_hint",
             default="开启后，单人聊天里的模型可以通过 continue_conversation 工具主动续说；达到上限后继续调用会被忽略。",
-        ), page)))
+        ), page))
+        auto_continue_hint.setObjectName("llmHint")
+        layout.addWidget(auto_continue_hint)
 
         cross_chat_history_row = QHBoxLayout()
         cross_chat_history_row.setContentsMargins(0, 0, 0, 0)
@@ -282,28 +287,38 @@ class LLMPageMixin:
         cross_chat_history_row.addStretch()
         cross_chat_history_row.addWidget(self._llm_cross_chat_history_enabled)
         layout.addLayout(cross_chat_history_row)
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        cross_chat_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_cross_chat_history_enabled_hint",
             default="关闭后，模型不会额外读取其他私聊或群聊的历史摘录，只保留当前会话、长期记忆和当前时间等上下文。",
-        ), page)))
+        ), page))
+        cross_chat_hint.setObjectName("llmHint")
+        layout.addWidget(cross_chat_hint)
 
         layout.addWidget(SubtitleLabel(_tr("SettingsWindow.llm_chat_commands_title", default="LLM 对话命令"), page))
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        command_stop_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_chat_commands_hint",
             default="@stop / @停止 / @中断：强制中断当前模型输出。好感度、记忆和关系数值命令在\u201c好感度 / 记忆\u201d页说明。",
-        ), page)))
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        ), page))
+        command_stop_hint.setObjectName("llmHint")
+        layout.addWidget(command_stop_hint)
+        command_cot_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_chat_commands_cot",
             default="@cot [开/关]：快速开启或关闭思维链显示；省略参数则切换当前状态。",
-        ), page)))
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        ), page))
+        command_cot_hint.setObjectName("llmHint")
+        layout.addWidget(command_cot_hint)
+        command_websearch_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_chat_commands_websearch",
             default="@websearch [开/关]：快速开启或关闭联网搜索；省略参数则切换当前状态。",
-        ), page)))
-        layout.addWidget(_wrap_label(BodyLabel(_tr(
+        ), page))
+        command_websearch_hint.setObjectName("llmHint")
+        layout.addWidget(command_websearch_hint)
+        command_sys_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_chat_commands_sys_instruction",
             default="@sys-instruction [开/关]：开启或关闭最高优先级系统提示词预设；省略参数则切换当前状态。",
-        ), page)))
+        ), page))
+        command_sys_hint.setObjectName("llmHint")
+        layout.addWidget(command_sys_hint)
 
         custom_system_row = QHBoxLayout()
         custom_system_row.setContentsMargins(0, 0, 0, 0)
@@ -329,13 +344,14 @@ class LLMPageMixin:
             default="关闭开关可临时禁用且保留内容。这里的内容会在每次聊天请求中置于角色设定之前。",
         ))
         _horizontal_scroll_text_edit(self._llm_custom_system_prompt)
-        self._llm_custom_system_prompt.setMinimumHeight(72)
-        self._llm_custom_system_prompt.setMaximumHeight(120)
+        self._llm_custom_system_prompt.setMinimumHeight(64)
+        self._llm_custom_system_prompt.setMaximumHeight(96)
         layout.addWidget(self._llm_custom_system_prompt)
         custom_system_hint = _wrap_label(BodyLabel(_tr(
             "SettingsWindow.llm_custom_system_prompt_hint",
             default="这段指令优先级高于角色档案、长期记忆和会话历史；建议只写全局行为约束，避免与角色身份或动作标签规则冲突。",
         ), page))
+        custom_system_hint.setObjectName("llmHint")
         layout.addWidget(custom_system_hint)
 
         layout.addStretch()
@@ -370,14 +386,14 @@ class LLMPageMixin:
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setMinimumHeight(80)
-        scroll.setMaximumHeight(220)
+        scroll.setMinimumHeight(64)
+        scroll.setMaximumHeight(160)
         scroll.hide()
 
         list_widget = QWidget(parent)
         list_layout = QVBoxLayout(list_widget)
-        list_layout.setContentsMargins(0, 4, 0, 4)
-        list_layout.setSpacing(2)
+        list_layout.setContentsMargins(0, 2, 0, 2)
+        list_layout.setSpacing(1)
         scroll.setWidget(list_widget)
         return label, scroll, list_widget, list_layout
 
@@ -466,6 +482,8 @@ class LLMPageMixin:
         self._pov_custom_prompt.setStyleSheet(style)
         hint_color = "#a7b0bf" if dark else "#687385"
         self._llm_api_url_hint.setStyleSheet(f"color: {hint_color}; font-size: 13px;")
+        for hint in self._llm_api_url.window().findChildren(QLabel, "llmHint"):
+            hint.setStyleSheet(f"color: {hint_color}; font-size: 12px; line-height: 16px;")
         self._llm_active_api_profile_label.setStyleSheet(f"color: {hint_color}; font-size: 13px;")
         self._style_avatar_buttons()
         self._update_user_avatar_preview()
