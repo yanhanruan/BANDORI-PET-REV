@@ -39,6 +39,8 @@ def screen_awareness_vision_config(config) -> tuple[str, str, str, object]:
         model_id = str(config.get("llm_aux_model_id", "") or "").strip() or str(config.get("llm_model_id", "") or "").strip()
     if thinking not in (True, False, None):
         thinking = config.get("llm_aux_enable_thinking", None)
+    if thinking not in (True, False, None):
+        thinking = config.get("llm_enable_thinking", None)
     return api_url, api_key, model_id, thinking
 
 
