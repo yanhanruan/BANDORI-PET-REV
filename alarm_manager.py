@@ -107,7 +107,7 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
             self._cfg.set(POMODORO_CONFIG_KEY, pomodoros)
             self._cfg.set(PROACTIVE_COMPANION_CONFIG_KEY, proactive)
             self._cfg.save()
-        self._schedule_screen_awareness(reset=True)
+        self._schedule_next_screen_awareness()
 
     def trigger_screen_awareness_now(self) -> bool:
         if not self._screen_awareness_enabled():
@@ -115,7 +115,7 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
         if self._screen_awareness_worker is not None and self._screen_awareness_worker.isRunning():
             return False
         now = local_now()
-        self._next_screen_awareness_at = now + timedelta(minutes=self._screen_awareness_interval())
+        self._schedule_next_screen_awareness(now)
         self._start_screen_awareness_capture(now)
         return True
 
@@ -211,12 +211,13 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
     def _screen_awareness_interval(self) -> int:
         return clamp_screen_awareness_interval(self._cfg.get("screen_awareness_interval_minutes", 30) if self._cfg else 30)
 
-    def _schedule_screen_awareness(self, reset: bool = False):
+    def _schedule_next_screen_awareness(self, now=None) -> bool:
         if not self._screen_awareness_enabled():
             self._next_screen_awareness_at = None
-            return
-        if reset or self._next_screen_awareness_at is None:
-            self._next_screen_awareness_at = local_now() + timedelta(minutes=self._screen_awareness_interval())
+            return False
+        base = now or local_now()
+        self._next_screen_awareness_at = base + timedelta(minutes=self._screen_awareness_interval())
+        return True
 
     def _maybe_trigger_screen_awareness(self, now):
         if not self._screen_awareness_enabled():
@@ -225,11 +226,11 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
         if self._screen_awareness_worker is not None and self._screen_awareness_worker.isRunning():
             return
         if self._next_screen_awareness_at is None:
-            self._schedule_screen_awareness(reset=True)
+            self._schedule_next_screen_awareness(now)
             return
         if now < self._next_screen_awareness_at:
             return
-        self._next_screen_awareness_at = now + timedelta(minutes=self._screen_awareness_interval())
+        self._schedule_next_screen_awareness(now)
         self._start_screen_awareness_capture(now)
 
     def _start_screen_awareness_capture(self, trigger_now):
