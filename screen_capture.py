@@ -2,13 +2,18 @@ import base64
 import ctypes
 import io
 import os
+import threading
 
 from PIL import ImageGrab
 
 
+_SCREENSHOT_LOCK = threading.Lock()
+
+
 def capture_screenshot_data_url(max_width: int = 1280) -> tuple[str, int, int, int, int]:
     try:
-        image = ImageGrab.grab(all_screens=True)
+        with _SCREENSHOT_LOCK:
+            image = ImageGrab.grab(all_screens=True)
     except Exception:
         raise RuntimeError("Failed to capture screenshot. This may happen when no display is available or a security restriction prevents screen capture.")
     max_width = max(640, min(1920, _int(max_width, 1280)))
