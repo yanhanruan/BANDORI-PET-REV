@@ -46,7 +46,7 @@ def desktop_bounds(fallback_width: int, fallback_height: int) -> tuple[int, int,
     return 0, 0, max(1, fallback_width), max(1, fallback_height)
 
 
-def _int(value, default: int) -> int:
+def _int(value, default: int = 0) -> int:
     try:
         return int(round(float(value)))
     except (TypeError, ValueError):

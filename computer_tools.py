@@ -3,7 +3,7 @@ import json
 import time
 
 from desktop_state import current_desktop_state_json, desktop_state_enabled
-from screen_capture import capture_screenshot_data_url, desktop_bounds
+from screen_capture import _int, capture_screenshot_data_url, desktop_bounds
 from vision_fallback import analyze_images_with_aux_model
 
 
@@ -262,13 +262,6 @@ def _capture_screenshot_data_url(config: dict) -> tuple[str, int, int, int, int]
 def _require(config: dict, key: str, label: str):
     if not bool(config.get(key, False)):
         raise PermissionError(f"{label} is disabled in Computer Use settings")
-
-
-def _int(value) -> int:
-    try:
-        return int(round(float(value)))
-    except (TypeError, ValueError):
-        return 0
 
 
 def _map_point(x: int, y: int) -> tuple[int, int]:
