@@ -1176,6 +1176,10 @@ class SearchSourcePopup(QFrame):
         super().__init__(parent, Qt.WindowType.ToolTip)
         self.setObjectName("SearchSourcePopup")
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(3)
@@ -1204,15 +1208,33 @@ class SearchSourcePopup(QFrame):
         border = "#3b4356" if dark else "#dce2ee"
         text = "#f7f7fb" if dark else "#1f2328"
         muted = "#b8c0d4" if dark else "#657089"
+        self._bg = QColor(bg)
+        self._border = QColor(border)
         self.setStyleSheet(f"""
             QFrame#SearchSourcePopup {{
-                background: {bg};
-                border: 1px solid {border};
-                border-radius: 10px;
+                background: transparent;
+                border: none;
             }}
             QFrame#SearchSourcePopup QLabel {{ color: {text}; background: transparent; }}
             QFrame#SearchSourcePopup QLabel#SearchSourceUrl {{ color: {muted}; }}
         """)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 10, 10)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 10, 10)
+        painter.fillPath(path, self._bg)
+        painter.setPen(QPen(self._border, 1))
+        painter.drawPath(path)
+        super().paintEvent(event)
 
 
 class SearchSourceBadge(QLabel):
