@@ -579,6 +579,7 @@ class LLMStreamWorker(QThread):
             messages = [dict(message) for message in self._messages]
             use_tools = (
                 self._web_search
+                or bool(self._tool_config.get("llm_web_fetch_enabled", False))
                 or bool(self._tool_config.get("llm_auto_continue_enabled", False))
                 or reminder_tools_enabled(self._tool_config)
                 or bool(self._tool_config.get("llm_mcp_enabled", False))
@@ -844,7 +845,12 @@ class ResponsesStreamWorker(QThread):
     def run(self):
         try:
             messages = [dict(message) for message in self._messages]
-            if self._web_search or self._tool_config.get("llm_mcp_enabled", False) or self._tool_config.get("computer_use_enabled", False):
+            if (
+                self._web_search
+                or self._tool_config.get("llm_web_fetch_enabled", False)
+                or self._tool_config.get("llm_mcp_enabled", False)
+                or self._tool_config.get("computer_use_enabled", False)
+            ):
                 messages = with_local_tool_system_hint(messages, self._tool_config)
             instructions, input_items = _messages_to_responses_input(messages)
             body = {

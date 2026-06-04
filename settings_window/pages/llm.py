@@ -227,6 +227,19 @@ class LLMPageMixin:
         web_search_sources_row.addWidget(self._llm_web_search_show_sources)
         layout.addLayout(web_search_sources_row)
 
+        web_fetch_row = QHBoxLayout()
+        web_fetch_row.setContentsMargins(0, 0, 0, 0)
+        web_fetch_label = BodyLabel(_tr("SettingsWindow.llm_web_fetch_enabled", default="WebFetch 访问链接"), page)
+        self._llm_web_fetch_enabled = SwitchButton(page)
+        web_fetch_row.addWidget(web_fetch_label)
+        web_fetch_row.addStretch()
+        web_fetch_row.addWidget(self._llm_web_fetch_enabled)
+        layout.addLayout(web_fetch_row)
+        layout.addWidget(_wrap_label(BodyLabel(_tr(
+            "SettingsWindow.llm_web_fetch_hint",
+            default="开启后，模型可以读取用户提供的网页链接；同时开启联网搜索时，也可以进一步读取搜索结果里的网页。",
+        ), page)))
+
         auto_continue_row = QHBoxLayout()
         auto_continue_row.setContentsMargins(0, 0, 0, 0)
         auto_continue_label = BodyLabel(_tr(
@@ -387,6 +400,7 @@ class LLMPageMixin:
                 "_llm_web_search_enabled",
                 "_llm_web_search_engine",
                 "_llm_web_search_show_sources",
+                "_llm_web_fetch_enabled",
                 "_llm_auto_continue_enabled",
                 "_llm_auto_continue_max_turns",
                 "_llm_cross_chat_history_enabled",
@@ -484,6 +498,7 @@ class LLMPageMixin:
                     self._llm_web_search_engine.setCurrentIndex(i)
                     break
             self._llm_web_search_show_sources.setChecked(bool(self._cfg.get("llm_web_search_show_sources", True)))
+            self._llm_web_fetch_enabled.setChecked(bool(self._cfg.get("llm_web_fetch_enabled", False)))
             self._llm_auto_continue_enabled.setChecked(bool(self._cfg.get("llm_auto_continue_enabled", False)))
             try:
                 auto_continue_max = int(self._cfg.get("llm_auto_continue_max_turns", 5) or 5)
@@ -569,6 +584,7 @@ class LLMPageMixin:
                 "llm_web_search_enabled": bool(profile.get("llm_web_search_enabled", False)),
                 "llm_web_search_engine": str(profile.get("llm_web_search_engine", "bing_cn") or "bing_cn"),
                 "llm_web_search_show_sources": bool(profile.get("llm_web_search_show_sources", True)),
+                "llm_web_fetch_enabled": bool(profile.get("llm_web_fetch_enabled", False)),
                 "llm_auto_continue_enabled": bool(profile.get("llm_auto_continue_enabled", False)),
                 "llm_auto_continue_max_turns": max(1, min(20, int(profile.get("llm_auto_continue_max_turns", 5) or 5)))
                 if str(profile.get("llm_auto_continue_max_turns", 5) or "").strip().lstrip("-").isdigit() else 5,
@@ -598,6 +614,7 @@ class LLMPageMixin:
             "llm_web_search_enabled": self._llm_web_search_enabled.isChecked(),
             "llm_web_search_engine": self._llm_web_search_engine.itemData(self._llm_web_search_engine.currentIndex()) or "bing_cn",
             "llm_web_search_show_sources": self._llm_web_search_show_sources.isChecked(),
+            "llm_web_fetch_enabled": self._llm_web_fetch_enabled.isChecked(),
             "llm_auto_continue_enabled": self._llm_auto_continue_enabled.isChecked(),
             "llm_auto_continue_max_turns": self._llm_auto_continue_max_turns.value(),
             "llm_cross_chat_history_enabled": self._llm_cross_chat_history_enabled.isChecked(),
@@ -623,6 +640,7 @@ class LLMPageMixin:
             "llm_web_search_enabled": bool(self._cfg.get("llm_web_search_enabled", False)),
             "llm_web_search_engine": self._cfg.get("llm_web_search_engine", "bing_cn") or "bing_cn",
             "llm_web_search_show_sources": bool(self._cfg.get("llm_web_search_show_sources", True)),
+            "llm_web_fetch_enabled": bool(self._cfg.get("llm_web_fetch_enabled", False)),
             "llm_auto_continue_enabled": bool(self._cfg.get("llm_auto_continue_enabled", False)),
             "llm_auto_continue_max_turns": max(1, min(20, int(self._cfg.get("llm_auto_continue_max_turns", 5) or 5)))
             if str(self._cfg.get("llm_auto_continue_max_turns", 5) or "").strip().lstrip("-").isdigit() else 5,
@@ -646,6 +664,7 @@ class LLMPageMixin:
             "llm_web_search_enabled",
             "llm_web_search_engine",
             "llm_web_search_show_sources",
+            "llm_web_fetch_enabled",
             "llm_auto_continue_enabled",
             "llm_auto_continue_max_turns",
             "llm_cross_chat_history_enabled",
@@ -777,6 +796,7 @@ class LLMPageMixin:
                 self._llm_web_search_engine.setCurrentIndex(i)
                 break
         self._llm_web_search_show_sources.setChecked(bool(profile.get("llm_web_search_show_sources", True)))
+        self._llm_web_fetch_enabled.setChecked(bool(profile.get("llm_web_fetch_enabled", False)))
         self._llm_auto_continue_enabled.setChecked(bool(profile.get("llm_auto_continue_enabled", False)))
         try:
             auto_continue_max = int(profile.get("llm_auto_continue_max_turns", 5) or 5)
@@ -926,6 +946,7 @@ class LLMPageMixin:
             self._cfg.set("llm_web_search_enabled", self._llm_web_search_enabled.isChecked())
             self._cfg.set("llm_web_search_engine", self._llm_web_search_engine.itemData(self._llm_web_search_engine.currentIndex()) or "bing_cn")
             self._cfg.set("llm_web_search_show_sources", self._llm_web_search_show_sources.isChecked())
+            self._cfg.set("llm_web_fetch_enabled", self._llm_web_fetch_enabled.isChecked())
             self._cfg.set("llm_auto_continue_enabled", self._llm_auto_continue_enabled.isChecked())
             self._cfg.set("llm_auto_continue_max_turns", self._llm_auto_continue_max_turns.value())
             self._cfg.set("llm_cross_chat_history_enabled", self._llm_cross_chat_history_enabled.isChecked())

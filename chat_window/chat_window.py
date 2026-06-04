@@ -4261,9 +4261,10 @@ class ChatWindow(QWidget):
         if self._is_group_chat:
             tool_config["llm_auto_continue_enabled"] = False
         web_search = bool(self._cfg.get("llm_web_search_enabled", False))
+        web_fetch = bool(self._cfg.get("llm_web_fetch_enabled", False))
         show_search_sources = bool(self._cfg.get("llm_web_search_show_sources", True))
         use_reminder_tools = reminder_tools_enabled(tool_config)
-        if self._use_responses_api(api_url) and not web_search and not use_reminder_tools:
+        if self._use_responses_api(api_url) and not web_search and not web_fetch and not use_reminder_tools:
             self._worker = ResponsesStreamWorker(
                 api_url,
                 api_key,
