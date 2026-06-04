@@ -257,6 +257,8 @@ class TTSPageMixin:
         if not (self._cfg and self._tts_config_widgets_ready()):
             return
 
+        from tts_manager import TTSPlayer as _TTSPlayer, TTSRequestWorker as _TTSRequestWorker
+
         config = self._current_tts_config(include_llm=True)
         test_text = self._tts_test_text.toPlainText().strip()
         if not test_text:
@@ -285,10 +287,10 @@ class TTSPageMixin:
         self._tts_test_failed = False
         self._tts_test_received_audio = False
         if getattr(self, "_tts_test_player", None) is None:
-            self._tts_test_player = TTSPlayer(self)
+            self._tts_test_player = _TTSPlayer(self)
             self._tts_test_player.error.connect(self._on_tts_test_error)
             self._tts_test_player.playback_finished.connect(self._on_tts_test_playback_finished)
-        self._tts_test_worker = TTSRequestWorker(0, 0, test_text, test_character, config, self)
+        self._tts_test_worker = _TTSRequestWorker(0, 0, test_text, test_character, config, self)
         self._tts_test_worker.audio_ready.connect(self._on_tts_test_audio_ready)
         self._tts_test_worker.error.connect(self._on_tts_test_error)
         self._tts_test_worker.finished.connect(self._on_tts_test_finished)
