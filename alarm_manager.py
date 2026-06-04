@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from datetime import timedelta
 
 from PySide6.QtCore import QObject, QTimer
@@ -38,6 +39,7 @@ from reminder_core import (
     pomodoro_phase_label,
     repeat_days_label,
 )
+from screen_awareness import ScreenAwarenessVisionWorker, clamp_screen_awareness_interval
 from tts_common import SingleShotTTSCallbacksMixin, strip_tts_action_tags
 
 try:
@@ -80,6 +82,8 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
         self._active_worker: NonStreamWorker | None = None
         self._active_context: dict | None = None
         self._watchdog_timer: QTimer | None = None
+        self._screen_awareness_worker: ScreenAwarenessVisionWorker | None = None
+        self._next_screen_awareness_at = None
         self._timer = QTimer(self)
         self._timer.setInterval(15_000)
         self._timer.timeout.connect(self._tick)
@@ -103,6 +107,17 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
             self._cfg.set(POMODORO_CONFIG_KEY, pomodoros)
             self._cfg.set(PROACTIVE_COMPANION_CONFIG_KEY, proactive)
             self._cfg.save()
+        self._schedule_screen_awareness(reset=True)
+
+    def trigger_screen_awareness_now(self) -> bool:
+        if not self._screen_awareness_enabled():
+            return False
+        if self._screen_awareness_worker is not None and self._screen_awareness_worker.isRunning():
+            return False
+        now = local_now()
+        self._next_screen_awareness_at = now + timedelta(minutes=self._screen_awareness_interval())
+        self._start_screen_awareness_capture(now)
+        return True
 
     def stop(self):
         self._timer.stop()
@@ -116,6 +131,11 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
                 worker.wait(1000)
         self._workers.clear()
         self._reset_tts()
+        if self._screen_awareness_worker is not None and self._screen_awareness_worker.isRunning():
+            self._screen_awareness_worker.requestInterruption()
+            self._screen_awareness_worker.quit()
+            self._screen_awareness_worker.wait(1000)
+        self._screen_awareness_worker = None
         for worker in list(self._cancelled_tts_workers):
             if worker is not None and worker.isRunning():
                 worker.requestInterruption()
@@ -174,6 +194,8 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
                 item["next_at"] = isoformat(compute_next_proactive_at(item, now + timedelta(seconds=30)))
                 changed = True
 
+        self._maybe_trigger_screen_awareness(now)
+
         if changed:
             self._cfg.set(ALARM_CONFIG_KEY, alarms)
             self._cfg.set(POMODORO_CONFIG_KEY, pomodoros)
@@ -182,6 +204,94 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
                 self._cfg.save()
             except OSError as exc:
                 _log.error("ReminderScheduler tick: failed to persist config: %s", exc)
+
+    def _screen_awareness_enabled(self) -> bool:
+        return bool(self._cfg and self._cfg.get("screen_awareness_enabled", False))
+
+    def _screen_awareness_interval(self) -> int:
+        return clamp_screen_awareness_interval(self._cfg.get("screen_awareness_interval_minutes", 30) if self._cfg else 30)
+
+    def _schedule_screen_awareness(self, reset: bool = False):
+        if not self._screen_awareness_enabled():
+            self._next_screen_awareness_at = None
+            return
+        if reset or self._next_screen_awareness_at is None:
+            self._next_screen_awareness_at = local_now() + timedelta(minutes=self._screen_awareness_interval())
+
+    def _maybe_trigger_screen_awareness(self, now):
+        if not self._screen_awareness_enabled():
+            self._next_screen_awareness_at = None
+            return
+        if self._screen_awareness_worker is not None and self._screen_awareness_worker.isRunning():
+            return
+        if self._next_screen_awareness_at is None:
+            self._schedule_screen_awareness(reset=True)
+            return
+        if now < self._next_screen_awareness_at:
+            return
+        self._next_screen_awareness_at = now + timedelta(minutes=self._screen_awareness_interval())
+        self._start_screen_awareness_capture(now)
+
+    def _start_screen_awareness_capture(self, trigger_now):
+        character = self._screen_awareness_character()
+        worker = ScreenAwarenessVisionWorker(dict(getattr(self._cfg, "_data", {}) or {}), self)
+        self._screen_awareness_worker = worker
+        worker.finished.connect(
+            lambda summary, metrics, worker=worker, character=character, trigger_now=trigger_now:
+                self._on_screen_awareness_finished(worker, character, trigger_now, summary, metrics)
+        )
+        worker.error.connect(
+            lambda message, worker=worker:
+                self._on_screen_awareness_error(worker, message)
+        )
+        worker.start()
+
+    def _on_screen_awareness_finished(self, worker: ScreenAwarenessVisionWorker, character: str, trigger_now, summary: str, metrics: dict):
+        if worker is not self._screen_awareness_worker:
+            return
+        self._screen_awareness_worker = None
+        worker.deleteLater()
+        summary = str(summary or "").strip()
+        if not summary:
+            return
+        self._start_text_generation({
+            "kind": "screen_awareness",
+            "title": _tr("Reminder.title_screen_awareness", default="屏幕感知"),
+            "notification_title": _tr("Reminder.title_screen_awareness", default="屏幕感知"),
+            "character": character,
+            "description": _tr("Reminder.screen_awareness_description", default="根据当前屏幕内容判断是否主动搭话。"),
+            "screen_observation": summary,
+            "screen_metrics": metrics if isinstance(metrics, dict) else {},
+            "triggered_at": isoformat(trigger_now),
+        })
+
+    def _on_screen_awareness_error(self, worker: ScreenAwarenessVisionWorker, message: str):
+        if worker is not self._screen_awareness_worker:
+            return
+        _log.warning("Screen awareness failed: %s", message)
+        self._screen_awareness_worker = None
+        worker.deleteLater()
+
+    def _screen_awareness_character(self) -> str:
+        mode = str(self._cfg.get("screen_awareness_character_mode", "random_visible") or "random_visible").strip()
+        if mode == "fixed":
+            return self._reminder_character(self._cfg.get("screen_awareness_character", ""))
+        if mode == "default":
+            return self._reminder_character("")
+        candidates = []
+        seen = set()
+        models = self._cfg.get("models", []) if self._cfg else []
+        if isinstance(models, list):
+            for item in models:
+                if not isinstance(item, dict):
+                    continue
+                character = str(item.get("character", "") or "").strip()
+                if character and character not in seen:
+                    candidates.append(character)
+                    seen.add(character)
+        if candidates:
+            return random.choice(candidates)
+        return self._reminder_character("")
 
     def _trigger_alarm(self, alarm: dict, scheduled_at):
         character = self._reminder_character(alarm.get("character", ""))
@@ -340,6 +450,10 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
         character = context.get("character", "")
         api_url, api_key, model_id = self._api_config()
         if not api_url or not api_key or not model_id:
+            if context.get("kind") == "screen_awareness":
+                self._text_generation_busy = False
+                QTimer.singleShot(500, self._drain_pending_contexts)
+                return
             self._show_reminder(context, self._fallback_text(context), "surprised")
             self._text_generation_busy = False
             QTimer.singleShot(500, self._drain_pending_contexts)
@@ -361,11 +475,23 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
                     "但不要主动复述窗口标题、进程名等隐私细节。"
                     "只输出 1 到 2 句简短中文提醒，不要解释设置过程，不要使用 Markdown。可以在末尾保留一个合适动作标签。",
         )
+        if context.get("kind") == "screen_awareness":
+            instruction += _tr(
+                "Reminder.screen_awareness_llm_instruction",
+                default=(
+                    "\n如果这是 screen_awareness，请根据 screen_observation 判断是否值得主动开口。"
+                    "只有在用户可能卡住、专注太久、切换任务、看起来需要鼓励或有自然搭话点时才说话；"
+                    "如果不需要打扰，只输出 NO_SPEAK。不要说自己在截图或监控屏幕。"
+                ),
+            )
         payload = {
             "reminder": context,
             "character_display_name": display_name,
             "relationship_context": relationship,
         }
+        if context.get("screen_observation"):
+            payload["screen_observation"] = context.get("screen_observation", "")
+            payload["screen_metrics"] = context.get("screen_metrics", {})
         desktop_state = desktop_state_payload(self._cfg)
         if desktop_state:
             payload["desktop_state"] = desktop_state
@@ -415,7 +541,8 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
             self._watchdog_timer.stop()
             self._watchdog_timer = None
         self._forget_worker(worker)
-        self._show_reminder(context, self._fallback_text(context), "surprised")
+        if context.get("kind") != "screen_awareness":
+            self._show_reminder(context, self._fallback_text(context), "surprised")
         self._text_generation_busy = False
         QTimer.singleShot(300, self._drain_pending_contexts)
 
@@ -431,8 +558,16 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
         self._forget_worker(worker)
         actions = parse_action_tags(text)
         clean = strip_action_tags(text).strip()
+        if context.get("kind") == "screen_awareness" and clean.upper().strip(" 。.!！") == "NO_SPEAK":
+            self._text_generation_busy = False
+            QTimer.singleShot(300, self._drain_pending_contexts)
+            return
         if not clean:
             clean = self._fallback_text(context)
+        if context.get("kind") == "screen_awareness" and clean.upper().strip(" 。.!！") == "NO_SPEAK":
+            self._text_generation_busy = False
+            QTimer.singleShot(300, self._drain_pending_contexts)
+            return
         self._show_reminder(context, clean, actions[0] if actions else "surprised")
         self._text_generation_busy = False
         QTimer.singleShot(300, self._drain_pending_contexts)
@@ -440,6 +575,10 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
     def _on_text_generation_failed(self, worker: NonStreamWorker, context: dict):
         self._clear_watchdog()
         self._forget_worker(worker)
+        if context.get("kind") == "screen_awareness":
+            self._text_generation_busy = False
+            QTimer.singleShot(300, self._drain_pending_contexts)
+            return
         self._show_reminder(context, self._fallback_text(context), "surprised")
         self._text_generation_busy = False
         QTimer.singleShot(300, self._drain_pending_contexts)
@@ -480,6 +619,8 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
                 "desktop_state": "{name}：我在旁边留意着，你先按自己的节奏来，需要整理一下当前任务也可以叫我。",
             }
             return _tr(fallback_key, default=defaults.get(proactive_kind, "{name}：来照顾一下现在的生活节奏吧。"), name=display_name)
+        if kind == "screen_awareness":
+            return "NO_SPEAK"
         return _tr("Reminder.fallback_default", default="{name}：提醒时间到了。", name=display_name)
 
     def _desktop_state_fallback(self, context: dict, display_name: str) -> str:
@@ -513,7 +654,7 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
             self._speak_tts_text(text, character)
             return
         self._broadcast_event({
-            "source": "reminder",
+            "source": "screen_awareness" if context.get("kind") == "screen_awareness" else "reminder",
             "state": "done",
             "mode": "replace_raw",
             "title": display_name,
@@ -521,6 +662,7 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
             "action": action or "surprised",
             "ttl_ms": 18_000,
             "anchor_to_pet": True,
+            "temporary_overlay": bool(self._cfg.get("reminder_temporary_overlay_enabled", True)),
             "character": character,
         })
         self._speak_tts_text(text, character)

@@ -1,14 +1,9 @@
-import base64
 import ctypes
-import io
 import json
-import os
 import time
 
-from PIL import ImageGrab
-
 from desktop_state import current_desktop_state_json, desktop_state_enabled
-from process_utils import run_off_gui_thread
+from screen_capture import capture_screenshot_data_url, desktop_bounds
 from vision_fallback import analyze_images_with_aux_model
 
 
@@ -250,19 +245,9 @@ def _screenshot_result(config: dict, content: str) -> dict:
 
 def _capture_screenshot_data_url(config: dict) -> tuple[str, int, int, int, int]:
     global _LAST_SCREENSHOT_METRICS
-    try:
-        image = run_off_gui_thread(lambda: ImageGrab.grab(all_screens=True))
-    except Exception:
-        raise RuntimeError("Failed to capture screenshot. This may happen when no display is available or a security restriction prevents screen capture.")
     max_width = max(640, min(1920, _int(config.get("computer_use_max_screenshot_width", 1280))))
-    original_width, original_height = image.size
-    desktop_left, desktop_top, desktop_width, desktop_height = _desktop_bounds(original_width, original_height)
-    width, height = original_width, original_height
-    longest = max(original_width, original_height)
-    if longest > max_width:
-        scale = max_width / float(longest)
-        image = image.resize((max(1, int(width * scale)), max(1, int(height * scale))))
-        width, height = image.size
+    data_url, width, height, desktop_width, desktop_height = capture_screenshot_data_url(max_width)
+    desktop_left, desktop_top, _desktop_width, _desktop_height = desktop_bounds(desktop_width, desktop_height)
     _LAST_SCREENSHOT_METRICS = {
         "image_width": width,
         "image_height": height,
@@ -271,10 +256,7 @@ def _capture_screenshot_data_url(config: dict) -> tuple[str, int, int, int, int]
         "desktop_width": desktop_width,
         "desktop_height": desktop_height,
     }
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}", width, height, desktop_width, desktop_height
+    return data_url, width, height, desktop_width, desktop_height
 
 
 def _require(config: dict, key: str, label: str):
@@ -287,21 +269,6 @@ def _int(value) -> int:
         return int(round(float(value)))
     except (TypeError, ValueError):
         return 0
-
-
-def _desktop_bounds(fallback_width: int, fallback_height: int) -> tuple[int, int, int, int]:
-    if os.name == "nt":
-        try:
-            user32 = ctypes.windll.user32
-            left = int(user32.GetSystemMetrics(76))
-            top = int(user32.GetSystemMetrics(77))
-            width = int(user32.GetSystemMetrics(78))
-            height = int(user32.GetSystemMetrics(79))
-            if width > 0 and height > 0:
-                return left, top, width, height
-        except Exception:
-            pass
-    return 0, 0, max(1, fallback_width), max(1, fallback_height)
 
 
 def _map_point(x: int, y: int) -> tuple[int, int]:

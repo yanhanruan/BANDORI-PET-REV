@@ -800,6 +800,16 @@ def main():
             ("desktop_state_awareness_enabled", "desktop_state_awareness_enabled", False),
             ("desktop_state_idle_seconds", "desktop_state_idle_seconds", 180),
             ("desktop_state_include_window_title", "desktop_state_include_window_title", True),
+            ("screen_awareness_enabled", "screen_awareness_enabled", False),
+            ("screen_awareness_interval_minutes", "screen_awareness_interval_minutes", 30),
+            ("screen_awareness_character_mode", "screen_awareness_character_mode", "random_visible"),
+            ("screen_awareness_character", "screen_awareness_character", ""),
+            ("screen_awareness_max_screenshot_width", "screen_awareness_max_screenshot_width", 1920),
+            ("screen_awareness_vision_api_url", "screen_awareness_vision_api_url", ""),
+            ("screen_awareness_vision_api_key", "screen_awareness_vision_api_key", ""),
+            ("screen_awareness_vision_model_id", "screen_awareness_vision_model_id", ""),
+            ("screen_awareness_vision_enable_thinking", "screen_awareness_vision_enable_thinking", None),
+            ("reminder_temporary_overlay_enabled", "reminder_temporary_overlay_enabled", True),
         )
         language = data.get("language")
         if language:
@@ -842,6 +852,8 @@ def main():
         scheduler = reminder_ref.get("scheduler")
         if scheduler is not None:
             scheduler.reload()
+            if data.get("screen_awareness_test_requested"):
+                scheduler.trigger_screen_awareness_now()
 
     def launch_pet():
         nonlocal mgr

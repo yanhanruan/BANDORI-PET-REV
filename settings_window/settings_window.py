@@ -1377,6 +1377,17 @@ class SettingsWindow(
         self._nav_buttons["behavior"] = btn_behavior
         nav_layout.addWidget(btn_behavior)
 
+        btn_reminders = NavButton(
+            "reminders",
+            FluentIcon.DATE_TIME,
+            _tr("SettingsWindow.nav_reminders", default="屏幕感知 / 定时行为"),
+            nav_content,
+            "#ef4444",
+        )
+        btn_reminders.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["reminders"] = btn_reminders
+        nav_layout.addWidget(btn_reminders)
+
         btn_llm = NavButton("llm", FluentIcon.ROBOT, _tr("SettingsWindow.nav_llm"), nav_content, "#8b5cf6")
         btn_llm.nav_activated.connect(self._on_nav_selected)
         self._nav_buttons["llm"] = btn_llm
@@ -1423,17 +1434,6 @@ class SettingsWindow(
         btn_relationship_guide.nav_activated.connect(self._on_nav_selected)
         self._nav_buttons["relationship_guide"] = btn_relationship_guide
         nav_layout.addWidget(btn_relationship_guide)
-
-        btn_reminders = NavButton(
-            "reminders",
-            FluentIcon.DATE_TIME,
-            _tr("SettingsWindow.nav_reminders", default="闹钟番茄钟"),
-            nav_content,
-            "#ef4444",
-        )
-        btn_reminders.nav_activated.connect(self._on_nav_selected)
-        self._nav_buttons["reminders"] = btn_reminders
-        nav_layout.addWidget(btn_reminders)
 
         btn_compact = NavButton("compact_window", FluentIcon.CHAT, _tr("SettingsWindow.nav_compact_window"), nav_content, "#3b82f6")
         btn_compact.nav_activated.connect(self._on_nav_selected)

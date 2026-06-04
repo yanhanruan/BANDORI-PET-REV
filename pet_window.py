@@ -290,6 +290,8 @@ class PetWindow(QWidget):
         self._compact_ai_drag_bounds = None
         self._suppress_compact_ai_sync = False
         self._compact_ai_window_enabled = bool(self._cfg.get("compact_ai_window_enabled", False))
+        self._reminder_temporary_overlay_enabled = bool(self._cfg.get("reminder_temporary_overlay_enabled", True))
+        self._temporary_reminder_overlay_token = 0
         self._ai_event_overlay_enabled = bool(self._cfg.get("ai_event_overlay_enabled", False))
         self._chat_integration_overlay_enabled = bool(self._cfg.get("chat_integration_overlay_enabled", True))
         self._chat_process = None
@@ -1753,6 +1755,7 @@ class PetWindow(QWidget):
             "compact_ai_window_font_size",
             "compact_ai_window_background_color",
             "compact_ai_window_text_color",
+            "reminder_temporary_overlay_enabled",
             "ai_event_overlay_enabled",
             "chat_integration_enabled",
             "chat_integration_overlay_enabled",
@@ -1785,6 +1788,8 @@ class PetWindow(QWidget):
                 self._cfg.set("compact_ai_window_background_color", data["compact_ai_window_background_color"])
             if "compact_ai_window_text_color" in data:
                 self._cfg.set("compact_ai_window_text_color", data["compact_ai_window_text_color"])
+            if "reminder_temporary_overlay_enabled" in data:
+                self._cfg.set("reminder_temporary_overlay_enabled", bool(data["reminder_temporary_overlay_enabled"]))
             if "ai_event_overlay_enabled" in data:
                 self._cfg.set("ai_event_overlay_enabled", bool(data["ai_event_overlay_enabled"]))
             if "chat_integration_overlay_enabled" in data:
@@ -1826,6 +1831,8 @@ class PetWindow(QWidget):
             self._compact_ai_window_enabled = bool(data["compact_ai_window_enabled"])
             if not self._compact_ai_window_enabled:
                 self._close_compact_ai_window()
+        if "reminder_temporary_overlay_enabled" in data:
+            self._reminder_temporary_overlay_enabled = bool(data["reminder_temporary_overlay_enabled"])
         if "ai_event_overlay_enabled" in data:
             self._ai_event_overlay_enabled = bool(data["ai_event_overlay_enabled"])
         if "chat_integration_overlay_enabled" in data:
@@ -2630,7 +2637,8 @@ class PetWindow(QWidget):
         if action:
             self._on_chat_action(action)
 
-        if not self._compact_ai_window_enabled:
+        temporary_overlay = bool(event.get("temporary_overlay")) and self._reminder_temporary_overlay_enabled
+        if not self._compact_ai_window_enabled and not temporary_overlay:
             return
         if not self.isVisible():
             return
@@ -2643,10 +2651,24 @@ class PetWindow(QWidget):
             allow_create=True,
             force_visible=True,
             reposition=should_position,
+            temporary=temporary_overlay,
         )
         if self._compact_ai_window is None:
             return
         self._compact_ai_window.apply_ai_event(event)
+        if temporary_overlay and not self._compact_ai_window_enabled:
+            ttl_ms = _clamp_int(event.get("ttl_ms", 18_000), 1000, 120_000, 18_000)
+            self._temporary_reminder_overlay_token += 1
+            token = self._temporary_reminder_overlay_token
+            QTimer.singleShot(ttl_ms + 350, lambda: self._hide_temporary_reminder_overlay(token))
+
+    def _hide_temporary_reminder_overlay(self, token: int):
+        if token != self._temporary_reminder_overlay_token:
+            return
+        if self._compact_ai_window_enabled:
+            return
+        if self._compact_ai_window is not None:
+            self._close_compact_ai_window()
 
     def _handle_chat_event(self, event: dict):
         if not isinstance(event, dict):
@@ -2698,7 +2720,8 @@ class PetWindow(QWidget):
         if action:
             self._on_chat_action(action)
 
-        if not self._compact_ai_window_enabled:
+        temporary_overlay = bool(event.get("temporary_overlay")) and self._reminder_temporary_overlay_enabled
+        if not self._compact_ai_window_enabled and not temporary_overlay:
             return
         if not self.isVisible():
             return
@@ -2711,10 +2734,16 @@ class PetWindow(QWidget):
             allow_create=True,
             force_visible=True,
             reposition=should_position,
+            temporary=temporary_overlay,
         )
         if self._compact_ai_window is None:
             return
         self._compact_ai_window.apply_ai_event(event)
+        if temporary_overlay and not self._compact_ai_window_enabled:
+            ttl_ms = _clamp_int(event.get("ttl_ms", 18_000), 1000, 120_000, 18_000)
+            self._temporary_reminder_overlay_token += 1
+            token = self._temporary_reminder_overlay_token
+            QTimer.singleShot(ttl_ms + 350, lambda: self._hide_temporary_reminder_overlay(token))
 
     def _read_chat_process_error(self, process: QProcess):
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
@@ -2811,8 +2840,9 @@ class PetWindow(QWidget):
         allow_create: bool = False,
         force_visible: bool = False,
         reposition: bool = True,
+        temporary: bool = False,
     ):
-        if not self._compact_ai_window_enabled or not self.isVisible():
+        if (not self._compact_ai_window_enabled and not temporary) or not self.isVisible():
             if self._compact_ai_window is not None:
                 self._compact_ai_window.hide()
             return
