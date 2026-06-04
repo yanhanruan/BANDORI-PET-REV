@@ -227,6 +227,37 @@ class LLMPageMixin:
         web_search_sources_row.addWidget(self._llm_web_search_show_sources)
         layout.addLayout(web_search_sources_row)
 
+        auto_continue_row = QHBoxLayout()
+        auto_continue_row.setContentsMargins(0, 0, 0, 0)
+        auto_continue_label = BodyLabel(_tr(
+            "SettingsWindow.llm_auto_continue_enabled",
+            default="单人对话自动接话",
+        ), page)
+        self._llm_auto_continue_enabled = SwitchButton(page)
+        auto_continue_row.addWidget(auto_continue_label)
+        auto_continue_row.addStretch()
+        auto_continue_row.addWidget(self._llm_auto_continue_enabled)
+        layout.addLayout(auto_continue_row)
+
+        auto_continue_limit_row = QHBoxLayout()
+        auto_continue_limit_row.setContentsMargins(16, 0, 0, 0)
+        auto_continue_limit_label = BodyLabel(_tr(
+            "SettingsWindow.llm_auto_continue_max_turns",
+            default="接话硬上限",
+        ), page)
+        self._llm_auto_continue_max_turns = SpinBox(page)
+        self._llm_auto_continue_max_turns.setRange(1, 20)
+        self._llm_auto_continue_max_turns.setValue(5)
+        self._llm_auto_continue_max_turns.setFixedHeight(34)
+        auto_continue_limit_row.addWidget(auto_continue_limit_label)
+        auto_continue_limit_row.addStretch()
+        auto_continue_limit_row.addWidget(self._llm_auto_continue_max_turns)
+        layout.addLayout(auto_continue_limit_row)
+        layout.addWidget(_wrap_label(BodyLabel(_tr(
+            "SettingsWindow.llm_auto_continue_hint",
+            default="开启后，单人聊天里的模型可以通过 continue_conversation 工具主动续说；达到上限后继续调用会被忽略。",
+        ), page)))
+
         cross_chat_history_row = QHBoxLayout()
         cross_chat_history_row.setContentsMargins(0, 0, 0, 0)
         cross_chat_history_label = BodyLabel(_tr(
@@ -356,6 +387,8 @@ class LLMPageMixin:
                 "_llm_web_search_enabled",
                 "_llm_web_search_engine",
                 "_llm_web_search_show_sources",
+                "_llm_auto_continue_enabled",
+                "_llm_auto_continue_max_turns",
                 "_llm_cross_chat_history_enabled",
                 "_llm_custom_system_prompt_enabled",
                 "_llm_custom_system_prompt",
@@ -451,6 +484,12 @@ class LLMPageMixin:
                     self._llm_web_search_engine.setCurrentIndex(i)
                     break
             self._llm_web_search_show_sources.setChecked(bool(self._cfg.get("llm_web_search_show_sources", True)))
+            self._llm_auto_continue_enabled.setChecked(bool(self._cfg.get("llm_auto_continue_enabled", False)))
+            try:
+                auto_continue_max = int(self._cfg.get("llm_auto_continue_max_turns", 5) or 5)
+            except (TypeError, ValueError):
+                auto_continue_max = 5
+            self._llm_auto_continue_max_turns.setValue(max(1, min(20, auto_continue_max)))
             self._llm_cross_chat_history_enabled.setChecked(bool(self._cfg.get("llm_cross_chat_history_enabled", True)))
             self._llm_custom_system_prompt_enabled.setChecked(bool(self._cfg.get("llm_custom_system_prompt_enabled", True)))
             self._llm_custom_system_prompt.setPlainText(self._cfg.get("llm_custom_system_prompt", ""))
@@ -530,6 +569,9 @@ class LLMPageMixin:
                 "llm_web_search_enabled": bool(profile.get("llm_web_search_enabled", False)),
                 "llm_web_search_engine": str(profile.get("llm_web_search_engine", "bing_cn") or "bing_cn"),
                 "llm_web_search_show_sources": bool(profile.get("llm_web_search_show_sources", True)),
+                "llm_auto_continue_enabled": bool(profile.get("llm_auto_continue_enabled", False)),
+                "llm_auto_continue_max_turns": max(1, min(20, int(profile.get("llm_auto_continue_max_turns", 5) or 5)))
+                if str(profile.get("llm_auto_continue_max_turns", 5) or "").strip().lstrip("-").isdigit() else 5,
                 "llm_cross_chat_history_enabled": bool(profile.get("llm_cross_chat_history_enabled", True)),
                 "llm_enable_thinking": profile.get("llm_enable_thinking", None)
                 if profile.get("llm_enable_thinking", None) in (True, False, None) else None,
@@ -556,6 +598,8 @@ class LLMPageMixin:
             "llm_web_search_enabled": self._llm_web_search_enabled.isChecked(),
             "llm_web_search_engine": self._llm_web_search_engine.itemData(self._llm_web_search_engine.currentIndex()) or "bing_cn",
             "llm_web_search_show_sources": self._llm_web_search_show_sources.isChecked(),
+            "llm_auto_continue_enabled": self._llm_auto_continue_enabled.isChecked(),
+            "llm_auto_continue_max_turns": self._llm_auto_continue_max_turns.value(),
             "llm_cross_chat_history_enabled": self._llm_cross_chat_history_enabled.isChecked(),
             "llm_enable_thinking": thinking,
             "llm_show_reasoning": self._llm_show_reasoning.isChecked(),
@@ -579,6 +623,9 @@ class LLMPageMixin:
             "llm_web_search_enabled": bool(self._cfg.get("llm_web_search_enabled", False)),
             "llm_web_search_engine": self._cfg.get("llm_web_search_engine", "bing_cn") or "bing_cn",
             "llm_web_search_show_sources": bool(self._cfg.get("llm_web_search_show_sources", True)),
+            "llm_auto_continue_enabled": bool(self._cfg.get("llm_auto_continue_enabled", False)),
+            "llm_auto_continue_max_turns": max(1, min(20, int(self._cfg.get("llm_auto_continue_max_turns", 5) or 5)))
+            if str(self._cfg.get("llm_auto_continue_max_turns", 5) or "").strip().lstrip("-").isdigit() else 5,
             "llm_cross_chat_history_enabled": bool(self._cfg.get("llm_cross_chat_history_enabled", True)),
             "llm_enable_thinking": self._cfg.get("llm_enable_thinking", None)
             if self._cfg.get("llm_enable_thinking", None) in (True, False, None) else None,
@@ -599,6 +646,8 @@ class LLMPageMixin:
             "llm_web_search_enabled",
             "llm_web_search_engine",
             "llm_web_search_show_sources",
+            "llm_auto_continue_enabled",
+            "llm_auto_continue_max_turns",
             "llm_cross_chat_history_enabled",
             "llm_enable_thinking",
             "llm_show_reasoning",
@@ -728,6 +777,12 @@ class LLMPageMixin:
                 self._llm_web_search_engine.setCurrentIndex(i)
                 break
         self._llm_web_search_show_sources.setChecked(bool(profile.get("llm_web_search_show_sources", True)))
+        self._llm_auto_continue_enabled.setChecked(bool(profile.get("llm_auto_continue_enabled", False)))
+        try:
+            auto_continue_max = int(profile.get("llm_auto_continue_max_turns", 5) or 5)
+        except (TypeError, ValueError):
+            auto_continue_max = 5
+        self._llm_auto_continue_max_turns.setValue(max(1, min(20, auto_continue_max)))
         self._llm_cross_chat_history_enabled.setChecked(bool(profile.get("llm_cross_chat_history_enabled", True)))
         self._on_llm_web_search_enabled_changed(self._llm_web_search_enabled.isChecked())
         thinking = profile.get("llm_enable_thinking", None)
@@ -871,6 +926,8 @@ class LLMPageMixin:
             self._cfg.set("llm_web_search_enabled", self._llm_web_search_enabled.isChecked())
             self._cfg.set("llm_web_search_engine", self._llm_web_search_engine.itemData(self._llm_web_search_engine.currentIndex()) or "bing_cn")
             self._cfg.set("llm_web_search_show_sources", self._llm_web_search_show_sources.isChecked())
+            self._cfg.set("llm_auto_continue_enabled", self._llm_auto_continue_enabled.isChecked())
+            self._cfg.set("llm_auto_continue_max_turns", self._llm_auto_continue_max_turns.value())
             self._cfg.set("llm_cross_chat_history_enabled", self._llm_cross_chat_history_enabled.isChecked())
             self._cfg.set("llm_custom_system_prompt_enabled", self._llm_custom_system_prompt_enabled.isChecked())
             self._cfg.set("llm_custom_system_prompt", self._llm_custom_system_prompt.toPlainText().strip())

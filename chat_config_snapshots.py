@@ -9,6 +9,8 @@ COMMON_TOOL_CONFIG_KEYS = (
     "llm_aux_enable_thinking",
     "llm_aux_vision_fallback_enabled",
     "llm_web_search_engine",
+    "llm_auto_continue_enabled",
+    "llm_auto_continue_max_turns",
     "llm_mcp_enabled",
     "llm_mcp_use_native",
     "llm_mcp_servers",

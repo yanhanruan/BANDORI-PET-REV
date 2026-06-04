@@ -25,6 +25,7 @@ from reminder_core import (
 
 
 WEB_SEARCH_TOOL_NAME = "web_search"
+AUTO_CONTINUE_TOOL_NAME = "continue_conversation"
 CREATE_ALARM_TOOL_NAME = "create_alarm"
 START_POMODORO_TOOL_NAME = "start_pomodoro"
 _FORCE_WEB_SEARCH_PATTERN = re.compile(
@@ -142,6 +143,26 @@ CHAT_COMPLETIONS_REMINDER_TOOLS = [
     },
 ]
 
+CHAT_COMPLETIONS_AUTO_CONTINUE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": AUTO_CONTINUE_TOOL_NAME,
+        "description": (
+            "Continue the current one-on-one character conversation after already sending a natural partial reply. "
+            "Use this only when the character should add another short follow-up message without waiting for the user."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief reason why another short follow-up is needed.",
+                },
+            },
+        },
+    },
+}
+
 
 def web_search_system_hint(include_sources: bool = True) -> str:
     source_rule = (
@@ -166,6 +187,8 @@ def web_search_system_hint(include_sources: bool = True) -> str:
 def chat_completion_tools(web_search_enabled: bool, tool_config: dict | None = None) -> list[dict]:
     tools = [CHAT_COMPLETIONS_WEB_SEARCH_TOOL] if web_search_enabled else []
     config = tool_config or {}
+    if config.get("llm_auto_continue_enabled", False):
+        tools.append(CHAT_COMPLETIONS_AUTO_CONTINUE_TOOL)
     if reminder_tools_enabled(config):
         tools.extend(CHAT_COMPLETIONS_REMINDER_TOOLS)
     tools.extend(mcp_proxy_tools(config))
@@ -197,6 +220,14 @@ def local_tool_system_hint(tool_config: dict | None = None) -> str:
         hints.append(
             "当用户表达设置闹钟、提醒、番茄钟、专注计时等明确意图时，可以直接调用对应工具创建；"
             "时间不明确时先追问，不要凭空编造具体时间。工具成功后，用角色口吻简短确认。"
+        )
+    if config.get("llm_auto_continue_enabled", False):
+        max_turns = _normalize_auto_continue_max_turns(config.get("llm_auto_continue_max_turns", 5))
+        hints.append(
+            f"单人对话中，如果你已经说完一小段但角色还应该主动补充下一句，可以调用 {AUTO_CONTINUE_TOOL_NAME}；"
+            "如果用户明确要求一次发两条、多条、连续几条消息，必须在每条回复后调用这个工具，直到达到用户要求或硬上限。"
+            "调用前必须先输出当前这句自然回复，不要空内容只调用工具。"
+            f"本轮最多连续输出 {max_turns} 条，达到上限后继续工具调用会被忽略。"
         )
     if config.get("computer_use_enabled", False):
         if config.get("computer_use_auto_detect", True):
@@ -248,6 +279,8 @@ def with_web_search_system_hint(messages: list[dict], include_sources: bool = Tr
 
 
 def run_local_tool_call(name: str, arguments, tool_config: dict | None = None) -> dict:
+    if name == AUTO_CONTINUE_TOOL_NAME:
+        return _run_auto_continue_tool_call(arguments, tool_config or {})
     if name in {CREATE_ALARM_TOOL_NAME, START_POMODORO_TOOL_NAME}:
         return _run_reminder_tool_call(name, arguments, tool_config or {})
     if name != WEB_SEARCH_TOOL_NAME:
@@ -341,6 +374,31 @@ def _run_reminder_tool_call(name: str, arguments, tool_config: dict | None = Non
     except Exception as exc:
         return {"content": f"创建提醒失败：{exc}", "extra_messages": []}
     return {"content": "未知提醒工具。", "extra_messages": []}
+
+
+def _normalize_auto_continue_max_turns(value) -> int:
+    try:
+        return max(1, min(20, int(value)))
+    except (TypeError, ValueError):
+        return 5
+
+
+def _run_auto_continue_tool_call(arguments, tool_config: dict) -> dict:
+    del arguments
+    max_turns = _normalize_auto_continue_max_turns(tool_config.get("llm_auto_continue_max_turns", 5))
+    try:
+        current = max(0, int(tool_config.get("_auto_continue_count", 0) or 0))
+    except (TypeError, ValueError):
+        current = 0
+    remaining = max(0, max_turns - current - 1)
+    return {
+        "content": (
+            "可以继续以当前角色口吻补充下一句。"
+            f"本轮剩余可继续输出条数：{remaining}。"
+            "如果已经表达完整，请不要再次调用工具，直接结束回复。"
+        ),
+        "extra_messages": [],
+    }
 
 
 def _reminder_settings_payload(cfg, alarms: list[dict], pomodoros: list[dict]) -> dict:

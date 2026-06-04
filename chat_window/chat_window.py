@@ -4258,6 +4258,8 @@ class ChatWindow(QWidget):
             include_chat_keys=True,
             latest_user_text=self._last_user_text,
         )
+        if self._is_group_chat:
+            tool_config["llm_auto_continue_enabled"] = False
         web_search = bool(self._cfg.get("llm_web_search_enabled", False))
         show_search_sources = bool(self._cfg.get("llm_web_search_show_sources", True))
         use_reminder_tools = reminder_tools_enabled(tool_config)
@@ -4286,6 +4288,8 @@ class ChatWindow(QWidget):
                 tool_config=tool_config,
             )
         self._worker.chunk_received.connect(self._on_chunk_received)
+        if hasattr(self._worker, "auto_continue_boundary"):
+            self._worker.auto_continue_boundary.connect(self._on_auto_continue_boundary)
         self._worker.finished.connect(self._on_response_finished)
         self._worker.error.connect(self._on_response_error)
         self._worker.start()
@@ -4362,9 +4366,13 @@ class ChatWindow(QWidget):
         self._current_bubble.set_text(self._visible_stream_text)
         self._scroll_to_bottom()
 
-    def _on_response_finished(self, full_text: str, reasoning_text: str, actions: list):
+    def _on_auto_continue_boundary(self, full_text: str, reasoning_text: str, actions: list):
         if self.sender() is not self._worker:
             return
+        self._finalize_current_response_segment(full_text, reasoning_text, actions)
+        self._start_auto_continue_bubble(self._active_response_character)
+
+    def _finalize_current_response_segment(self, full_text: str, reasoning_text: str, actions: list) -> str:
         self._merge_search_sources(actions)
         acts = self._merged_action_tags(
             self._current_response_actions,
@@ -4404,6 +4412,36 @@ class ChatWindow(QWidget):
             self._db.add_message(self._conv_id, "assistant", stored, reasoning_clean, tool_trace=tool_trace)
             self._refresh_group_list()
         self._apply_relationship_update(self._active_response_character, self._last_user_text, clean, acts)
+        return clean
+
+    def _start_auto_continue_bubble(self, character: str):
+        self._stream_buffer = ""
+        self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
+        self._current_response_actions = []
+        self._action_tag_stream_buffer = ""
+        self._current_tts_rate = 1.0
+        self._stream_search_sources = []
+        self._pending_source_json = ""
+        avatar_path, avatar_data, avatar_focus = self._avatar_info_for_character(character)
+        self._current_bubble = MessageBubble(
+            "",
+            "assistant",
+            self._message_author(self._assistant_content(character, "")),
+            avatar_path=avatar_path,
+            avatar_data=avatar_data,
+            avatar_focus=avatar_focus,
+            show_reasoning=self._show_reasoning,
+        )
+        self._current_bubble.set_streaming(True)
+        self._msg_layout.insertWidget(self._msg_layout.count() - 1, self._current_bubble)
+        self._relayout_message_bubbles()
+        self._scroll_to_bottom()
+
+    def _on_response_finished(self, full_text: str, reasoning_text: str, actions: list):
+        if self.sender() is not self._worker:
+            return
+        self._finalize_current_response_segment(full_text, reasoning_text, actions)
 
         if self._is_group_chat:
             self._group_spoken.append(self._model_manager.get_display_name(self._active_response_character))

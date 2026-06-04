@@ -17,6 +17,7 @@ from llm_thinking import (
     apply_thinking_options as _apply_thinking_options,
 )
 from local_tools import (
+    AUTO_CONTINUE_TOOL_NAME,
     chat_completion_tools,
     reminder_tools_enabled,
     responses_native_tools,
@@ -548,6 +549,7 @@ def current_time_instruction(now: datetime | None = None) -> str:
 
 class LLMStreamWorker(QThread):
     chunk_received = Signal(str, str)
+    auto_continue_boundary = Signal(str, str, list)
     finished = Signal(str, str, list)
     error = Signal(str)
 
@@ -577,6 +579,7 @@ class LLMStreamWorker(QThread):
             messages = [dict(message) for message in self._messages]
             use_tools = (
                 self._web_search
+                or bool(self._tool_config.get("llm_auto_continue_enabled", False))
                 or reminder_tools_enabled(self._tool_config)
                 or bool(self._tool_config.get("llm_mcp_enabled", False))
                 or bool(self._tool_config.get("computer_use_enabled", False))
@@ -589,7 +592,10 @@ class LLMStreamWorker(QThread):
                 if prefetch_context:
                     self._remember_search_sources(prefetch_context)
                     messages.append({"role": "system", "content": prefetch_context})
-            max_tool_rounds = 8 if self._tool_config.get("computer_use_enabled", False) else 3
+            auto_continue_limit = self._auto_continue_limit()
+            auto_continue_call_limit = max(0, auto_continue_limit - 1)
+            max_tool_rounds = max(8 if self._tool_config.get("computer_use_enabled", False) else 3, auto_continue_limit)
+            auto_continue_count = 0
             for round_index in range(max_tool_rounds):
                 self._stream_tool_calls = []
                 try:
@@ -615,17 +621,46 @@ class LLMStreamWorker(QThread):
                 tool_calls = _normalize_stream_tool_calls(self._stream_tool_calls)
                 if not use_tools or not tool_calls:
                     break
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": tool_calls,
-                })
+                executable_tool_calls = []
                 for tool_call in tool_calls:
                     function = tool_call.get("function", {})
+                    if function.get("name") == AUTO_CONTINUE_TOOL_NAME:
+                        if auto_continue_count >= auto_continue_call_limit:
+                            continue
+                        auto_continue_count += 1
+                    executable_tool_calls.append(tool_call)
+                if not executable_tool_calls:
+                    break
+                segment_text = self._full_text
+                segment_reasoning = self._reasoning_text
+                has_auto_continue = any(
+                    (tool_call.get("function") or {}).get("name") == AUTO_CONTINUE_TOOL_NAME
+                    for tool_call in executable_tool_calls
+                )
+                messages.append({
+                    "role": "assistant",
+                    "content": segment_text or None,
+                    "tool_calls": executable_tool_calls,
+                })
+                if has_auto_continue:
+                    if segment_text.strip() or segment_reasoning.strip():
+                        content, reasoning = split_thinking_text(segment_text, segment_reasoning)
+                        parsed_content, inline_sources = extract_inline_search_sources(content)
+                        if self._show_search_sources:
+                            self._remember_search_source_items(inline_sources)
+                            content = parsed_content
+                        self.auto_continue_boundary.emit(content, reasoning, list(self._search_sources))
+                    self._full_text = ""
+                    self._reasoning_text = ""
+                for tool_call in executable_tool_calls:
+                    function = tool_call.get("function", {})
+                    tool_config = dict(self._tool_config)
+                    if function.get("name") == AUTO_CONTINUE_TOOL_NAME:
+                        tool_config["_auto_continue_count"] = auto_continue_count
                     tool_result = run_local_tool_call(
                         function.get("name", ""),
                         function.get("arguments", "{}"),
-                        self._tool_config,
+                        tool_config,
                     )
                     tool_content = str(tool_result.get("content", "") or "")
                     self._remember_search_sources(tool_content)
@@ -652,6 +687,14 @@ class LLMStreamWorker(QThread):
             self.error.emit(f"HTTP {e.code}: {_http_error_message(e)}")
         except Exception as e:
             self.error.emit(str(e))
+
+    def _auto_continue_limit(self) -> int:
+        if not self._tool_config.get("llm_auto_continue_enabled", False):
+            return 0
+        try:
+            return max(1, min(20, int(self._tool_config.get("llm_auto_continue_max_turns", 5))))
+        except (TypeError, ValueError):
+            return 5
 
     def _prefetch_web_search_context(self) -> str:
         latest_user_text = str(self._tool_config.get("_latest_user_text", "") or "").strip()
