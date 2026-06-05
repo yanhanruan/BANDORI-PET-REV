@@ -141,10 +141,13 @@ def main():
             return
         quit_ref["running"] = True
         notify_chat_processes_shutdown()
+        stop_ipc_server()
         stop_special_event_manager()
         stop_ai_status_server()
         stop_chat_integration_server()
-        stop_napcat_adapter()
+        stop_napcat_adapter(force=True)
+        stop_reminder_scheduler()
+        close_chat_integration_db()
         close_pet_processes(force=True)
         close_settings_process(force=True)
         close_chat_process(force=True)
@@ -170,6 +173,29 @@ def main():
         server.newConnection.connect(accept_clients)
         if server.listen(name):
             ipc_ref["server"] = server
+
+    def stop_ipc_server():
+        with ipc_ref["lock"]:
+            sockets = list(ipc_ref.get("clients", []))
+            ipc_ref["clients"] = []
+            ipc_ref["buffers"] = {}
+            server = ipc_ref.pop("server", None)
+        for socket in sockets:
+            if not isValid(socket):
+                continue
+            try:
+                socket.disconnectFromServer()
+                socket.close()
+            except RuntimeError:
+                pass
+            socket.deleteLater()
+        if server is not None and isValid(server):
+            try:
+                server.close()
+                QLocalServer.removeServer(ipc_server_name())
+            except RuntimeError:
+                pass
+            server.deleteLater()
 
     def remove_ipc_client(socket):
         with ipc_ref["lock"]:
@@ -404,17 +430,24 @@ def main():
             return
         chat_integration_ref["server"] = server
 
-    def stop_napcat_adapter():
+    def stop_napcat_adapter(force=False):
         with napcat_ref["lock"]:
             client = napcat_ref.get("client")
             workers = list(napcat_ref.get("workers", []))
             napcat_ref["workers"].clear()
         if client is not None:
             client.stop()
-            client.deleteLater()
+            if isValid(client):
+                client.deleteLater()
         for worker in workers:
             if isValid(worker) and worker.isRunning():
                 worker.requestInterruption()
+                worker.quit()
+                if force and not worker.wait(500):
+                    worker.terminate()
+                    worker.wait(500)
+            if isValid(worker):
+                worker.deleteLater()
         with napcat_ref["lock"]:
             napcat_ref["client"] = None
 
@@ -1197,15 +1230,16 @@ def main():
     usage_heartbeat.start()
 
     app.aboutToQuit.connect(save_config)
+    app.aboutToQuit.connect(stop_ipc_server)
     app.aboutToQuit.connect(stop_ai_status_server)
     app.aboutToQuit.connect(stop_chat_integration_server)
-    app.aboutToQuit.connect(stop_napcat_adapter)
+    app.aboutToQuit.connect(lambda: stop_napcat_adapter(force=True))
     app.aboutToQuit.connect(stop_reminder_scheduler)
     app.aboutToQuit.connect(close_chat_integration_db)
     app.aboutToQuit.connect(end_usage_session)
-    app.aboutToQuit.connect(close_settings_process)
-    app.aboutToQuit.connect(close_chat_process)
-    app.aboutToQuit.connect(close_pet_processes)
+    app.aboutToQuit.connect(lambda: close_settings_process(force=True))
+    app.aboutToQuit.connect(lambda: close_chat_process(force=True))
+    app.aboutToQuit.connect(lambda: close_pet_processes(force=True))
 
     if has_configured_models or model_valid:
         pet_window_ref["char"] = char
