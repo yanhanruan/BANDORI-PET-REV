@@ -3524,6 +3524,13 @@ class PetWindow(QWidget):
         model = self._live2d_widget.model
         if model is None:
             return
+        if not self._live2d_idle_actions_enabled:
+            try:
+                model.ClearMotions()
+            except Exception:
+                pass
+            self._apply_default_expression(model)
+            return
         motion_names = self._current_motion_names()
         configured_motion = self._current_model_entry().get("default_motion", "")
         if configured_motion in motion_names:
