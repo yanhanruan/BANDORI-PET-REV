@@ -1335,6 +1335,22 @@ class ChatWindow(QWidget):
 
         self._refresh_modern_chat_list()
 
+    def _sync_group_list_current_state(self) -> bool:
+        if not hasattr(self, "_group_list_layout"):
+            return False
+        found_current = False
+        current_key = self._conversation_key
+        for i in range(self._group_list_layout.count()):
+            item = self._group_list_layout.itemAt(i)
+            widget = item.widget() if item else None
+            if not isinstance(widget, GroupChatListRow):
+                continue
+            row_key = self._conversation_key_for(widget.characters())
+            is_current = row_key == current_key
+            widget.set_current(is_current)
+            found_current = found_current or is_current
+        return found_current
+
     def _show_new_chat_picker(self):
         if (self._worker and self._worker.isRunning()) or (self._group_plan_worker and self._group_plan_worker.isRunning()):
             return
@@ -2350,7 +2366,8 @@ class ChatWindow(QWidget):
         self._conv_id = None
         self._group_conv_id = ""
         self._load_or_create_conversation()
-        self._refresh_group_list()
+        if not self._sync_group_list_current_state():
+            self._refresh_group_list()
         self._input.setFocus()
 
     def _switch_group_conversation(self, conversation_id: str):

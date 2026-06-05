@@ -753,6 +753,16 @@ class GroupChatListRow(QWidget):
         self.apply_theme()
         self._update_elided_texts()
 
+    def characters(self) -> list[str]:
+        return list(self._characters)
+
+    def set_current(self, current: bool):
+        current = bool(current)
+        if self._current == current:
+            return
+        self._current = current
+        self.apply_theme()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_elided_texts()
