@@ -21,6 +21,7 @@ _NUMPY_MODULE = None
 _REQUESTS_MODULE = None
 _SOUNDDEVICE_MODULE = None
 _SOUNDFILE_MODULE = None
+_streaming_unavailable = False
 
 
 def _numpy():
@@ -384,9 +385,11 @@ class TTSRequestWorker(QThread):
             self._apply_qwen_lora(payload)
             speed_applied = self._apply_speed_factor(payload)
 
-            streaming_modes = [True, False] if self._config.get("tts_streaming", True) else [False]
+            global _streaming_unavailable
+            try_streaming = bool(self._config.get("tts_streaming", True)) and not _streaming_unavailable
+            streaming = try_streaming
             last_error = ""
-            for streaming in streaming_modes:
+            while True:
                 payload["stream_mode"] = "normal" if streaming else "close"
                 if streaming:
                     payload["media_type"] = "ogg"
@@ -408,7 +411,11 @@ class TTSRequestWorker(QThread):
                         response = _requests().post(self._tts_url(), json=payload, stream=streaming, timeout=120)
                     if response.status_code != 200:
                         last_error = f"TTS HTTP {response.status_code}: {response.text[:240]}"
-                        continue
+                        if streaming:
+                            _streaming_unavailable = True
+                            streaming = False
+                            continue
+                        break
                     last_error = ""
                     if streaming:
                         content_type = response.headers.get("Content-Type", "")
@@ -429,6 +436,11 @@ class TTSRequestWorker(QThread):
                     last_error = f"TTS HTTP {exc.code}: {body[:240]}"
                 except Exception as exc:
                     last_error = f"TTS: {exc}"
+                if streaming:
+                    _streaming_unavailable = True
+                    streaming = False
+                    continue
+                break
             if last_error:
                 self.error.emit(last_error)
                 return
