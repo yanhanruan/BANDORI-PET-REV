@@ -373,49 +373,65 @@ class TTSRequestWorker(QThread):
                 "text": text,
                 "text_language": text_language,
                 "cut_punc": "",
-                "stream_mode": "normal" if self._config.get("tts_streaming", True) else "close",
             }
             try:
                 payload["temperature"] = max(0.01, min(2.0, float(self._config.get("tts_temperature", 0.9))))
             except (TypeError, ValueError):
                 payload["temperature"] = 0.9
-            streaming = bool(self._config.get("tts_streaming", True))
-            if streaming:
-                payload["media_type"] = "ogg"
-                payload["stream_format"] = "framed"
-                payload["chunk_size"] = 8
-            else:
-                payload["media_type"] = "wav"
             prompt_text = self._reference_prompt_text(selected_language)
             if prompt_text:
                 payload["prompt_text"] = prompt_text
             self._apply_qwen_lora(payload)
             speed_applied = self._apply_speed_factor(payload)
 
-            response = _requests().post(self._tts_url(), json=payload, stream=streaming, timeout=120)
-            if response.status_code != 200 and speed_applied:
-                try:
-                    response.close()
-                except Exception:
-                    pass
-                payload.pop("speed_factor", None)
-                response = _requests().post(self._tts_url(), json=payload, stream=streaming, timeout=120)
-            if response.status_code != 200:
-                self.error.emit(f"TTS HTTP {response.status_code}: {response.text[:240]}")
-                return
-            if streaming:
-                content_type = response.headers.get("Content-Type", "")
-                if "application/octet-stream" in content_type:
-                    self._read_framed_stream(response)
+            streaming_modes = [True, False] if self._config.get("tts_streaming", True) else [False]
+            last_error = ""
+            for streaming in streaming_modes:
+                payload["stream_mode"] = "normal" if streaming else "close"
+                if streaming:
+                    payload["media_type"] = "ogg"
+                    payload["stream_format"] = "framed"
+                    payload["chunk_size"] = 8
                 else:
-                    for chunk in response.iter_content(chunk_size=None):
-                        if self.isInterruptionRequested():
+                    payload["media_type"] = "wav"
+                    payload.pop("stream_format", None)
+                    payload.pop("chunk_size", None)
+
+                try:
+                    response = _requests().post(self._tts_url(), json=payload, stream=streaming, timeout=120)
+                    if response.status_code != 200 and speed_applied:
+                        try:
                             response.close()
-                            return
-                        if chunk:
-                            self.audio_ready.emit(self.sequence, self.generation, chunk, "ogg")
-            elif response.content:
-                self.audio_ready.emit(self.sequence, self.generation, response.content, "wav")
+                        except Exception:
+                            pass
+                        payload.pop("speed_factor", None)
+                        response = _requests().post(self._tts_url(), json=payload, stream=streaming, timeout=120)
+                    if response.status_code != 200:
+                        last_error = f"TTS HTTP {response.status_code}: {response.text[:240]}"
+                        continue
+                    last_error = ""
+                    if streaming:
+                        content_type = response.headers.get("Content-Type", "")
+                        if "application/octet-stream" in content_type:
+                            self._read_framed_stream(response)
+                        else:
+                            for chunk in response.iter_content(chunk_size=None):
+                                if self.isInterruptionRequested():
+                                    response.close()
+                                    return
+                                if chunk:
+                                    self.audio_ready.emit(self.sequence, self.generation, chunk, "ogg")
+                    elif response.content:
+                        self.audio_ready.emit(self.sequence, self.generation, response.content, "wav")
+                    return
+                except urllib.error.HTTPError as exc:
+                    body = exc.read().decode("utf-8", errors="replace")
+                    last_error = f"TTS HTTP {exc.code}: {body[:240]}"
+                except Exception as exc:
+                    last_error = f"TTS: {exc}"
+            if last_error:
+                self.error.emit(last_error)
+                return
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             self.error.emit(f"TTS HTTP {exc.code}: {body[:240]}")
