@@ -82,12 +82,20 @@ if os.name == "nt":
     _is_window_visible = _user32.IsWindowVisible
     _is_window_visible.argtypes = [ctypes.wintypes.HWND]
     _is_window_visible.restype = ctypes.wintypes.BOOL
+    _get_window_rect = _user32.GetWindowRect
+    _get_window_rect.argtypes = [ctypes.wintypes.HWND, ctypes.POINTER(ctypes.wintypes.RECT)]
+    _get_window_rect.restype = ctypes.wintypes.BOOL
+    _get_cursor_pos = _user32.GetCursorPos
+    _get_cursor_pos.argtypes = [ctypes.POINTER(ctypes.wintypes.POINT)]
+    _get_cursor_pos.restype = ctypes.wintypes.BOOL
 else:
     _get_window_long = None
     _set_window_long = None
     _set_window_pos = None
     _find_window = None
     _is_window_visible = None
+    _get_window_rect = None
+    _get_cursor_pos = None
 
 _x11 = None
 
@@ -714,8 +722,8 @@ class PetWindow(QWidget):
                 if msg.message == WM_NCCALCSIZE:
                     return True, 0
                 if msg.message == WM_NCHITTEST:
-                    pos = self._global_pos_from_lparam(int(msg.lParam))
-                    if self._should_passthrough_at(pos):
+                    native_pos = self._global_pos_from_lparam(int(msg.lParam))
+                    if self._should_passthrough_at_native(native_pos):
                         return True, HTTRANSPARENT
                 if (
                     msg.message == WM_POWERBROADCAST
@@ -746,6 +754,55 @@ class PetWindow(QWidget):
     @classmethod
     def _global_pos_from_lparam(cls, value: int) -> QPoint:
         return QPoint(cls._signed_word(value), cls._signed_word(value >> 16))
+
+    def _qt_global_pos_from_native_pos(self, native_pos: QPoint) -> QPoint:
+        if os.name != "nt":
+            return native_pos
+        hwnd = int(self.winId())
+        if not hwnd or _get_window_rect is None:
+            return native_pos
+        rect = ctypes.wintypes.RECT()
+        if not _get_window_rect(hwnd, ctypes.byref(rect)):
+            return native_pos
+
+        geometry = self.geometry()
+        native_w = max(1, int(rect.right - rect.left))
+        native_h = max(1, int(rect.bottom - rect.top))
+        scale_x = native_w / max(1.0, float(geometry.width()))
+        scale_y = native_h / max(1.0, float(geometry.height()))
+        return QPoint(
+            int(round(geometry.left() + (native_pos.x() - rect.left) / scale_x)),
+            int(round(geometry.top() + (native_pos.y() - rect.top) / scale_y)),
+        )
+
+    def _window_local_pos_from_native_pos(self, native_pos: QPoint):
+        if os.name != "nt":
+            local = self.mapFromGlobal(native_pos)
+            return local if self.rect().contains(local) else None
+        hwnd = int(self.winId())
+        if not hwnd or _get_window_rect is None:
+            local = self.mapFromGlobal(self._qt_global_pos_from_native_pos(native_pos))
+            return local if self.rect().contains(local) else None
+        rect = ctypes.wintypes.RECT()
+        if not _get_window_rect(hwnd, ctypes.byref(rect)):
+            local = self.mapFromGlobal(self._qt_global_pos_from_native_pos(native_pos))
+            return local if self.rect().contains(local) else None
+
+        native_w = max(1, int(rect.right - rect.left))
+        native_h = max(1, int(rect.bottom - rect.top))
+        local_x = (native_pos.x() - rect.left) * max(1.0, float(self.width())) / native_w
+        local_y = (native_pos.y() - rect.top) * max(1.0, float(self.height())) / native_h
+        if not (0 <= local_x < self.width() and 0 <= local_y < self.height()):
+            return None
+        return QPoint(int(local_x), int(local_y))
+
+    def _native_cursor_pos(self) -> QPoint:
+        if os.name != "nt" or _get_cursor_pos is None:
+            return QCursor.pos()
+        point = ctypes.wintypes.POINT()
+        if not _get_cursor_pos(ctypes.byref(point)):
+            return QCursor.pos()
+        return QPoint(int(point.x), int(point.y))
 
     def _apply_windows_frameless_fix(self):
         if os.name != "nt":
@@ -960,10 +1017,9 @@ class PetWindow(QWidget):
 
     @staticmethod
     def _mouse_passthrough_supported() -> bool:
-        # Windows toggles WS_EX_TRANSPARENT; macOS toggles
-        # NSWindow.ignoresMouseEvents. Both rely on the same polling timer that
-        # samples the cursor against the model's alpha so clicks fall through the
-        # transparent margins to whatever is behind the pet.
+        # Windows still needs WS_EX_TRANSPARENT polling so transparent regions
+        # can pass clicks to pet windows owned by other processes. WM_NCHITTEST
+        # remains a same-window safety net for stale cursor samples.
         return os.name == "nt" or (sys.platform == "darwin" and macos_patch is not None)
 
     def _sync_mouse_passthrough_timer(self):
@@ -980,6 +1036,12 @@ class PetWindow(QWidget):
     def _tick_mouse_passthrough(self):
         if not self._mouse_passthrough_supported() or not self.isVisible():
             self._set_mouse_passthrough(False)
+            return
+        if self._is_pet_dragging():
+            self._set_mouse_passthrough(False)
+            return
+        if os.name == "nt":
+            self._set_mouse_passthrough(self._should_passthrough_at_native(self._native_cursor_pos()))
             return
         self._set_mouse_passthrough(self._should_passthrough_at(QCursor.pos()))
 
@@ -1010,6 +1072,13 @@ class PetWindow(QWidget):
             return self._pixel_widget.is_sprite_opaque_at_global(global_pos)
         return self._live2d_widget.is_model_opaque_at_global(global_pos, sync=True)
 
+    def _is_pet_opaque_at_window_local(self, local_pos: QPoint) -> bool:
+        if self._pixel_mode:
+            child_pos = self._pixel_widget.mapFrom(self, local_pos)
+            return self._pixel_widget.is_sprite_opaque_at_local(child_pos.x(), child_pos.y())
+        child_pos = self._live2d_widget.mapFrom(self, local_pos)
+        return self._live2d_widget.is_model_opaque_at_local(child_pos.x(), child_pos.y(), sync=True)
+
     def _should_passthrough_at(self, global_pos: QPoint) -> bool:
         if not self._mouse_passthrough_supported() or not self.isVisible():
             return False
@@ -1021,13 +1090,27 @@ class PetWindow(QWidget):
         except Exception:
             return False
 
+    def _should_passthrough_at_native(self, native_pos: QPoint) -> bool:
+        if not self.isVisible():
+            return False
+        local_pos = self._window_local_pos_from_native_pos(native_pos)
+        if local_pos is None:
+            return False
+        try:
+            return not self._is_pet_opaque_at_window_local(local_pos)
+        except Exception:
+            return False
+
     def _set_mouse_passthrough(self, enabled: bool):
-        if not self._mouse_passthrough_supported() or self._mouse_passthrough_enabled == bool(enabled):
+        if not self._mouse_passthrough_supported():
             return
+        enabled = bool(enabled)
         if sys.platform == "darwin":
-            if not macos_patch.set_ignores_mouse_events(self, bool(enabled)):
+            if self._mouse_passthrough_enabled == enabled:
                 return
-            self._mouse_passthrough_enabled = bool(enabled)
+            if not macos_patch.set_ignores_mouse_events(self, enabled):
+                return
+            self._mouse_passthrough_enabled = enabled
             return
         hwnd = int(self.winId())
         if not hwnd:

@@ -763,9 +763,15 @@ class Live2DWidget(QOpenGLWidget):
 
     def is_model_opaque_at_global(self, global_pos: QPoint, *, sync: bool = True) -> bool:
         local = self._get_valid_local_pos(global_pos)
-        if not local or not self._model:
+        return self.is_model_opaque_at_local(local.x(), local.y(), sync=sync) if local else False
+
+    def is_model_hit_at_local(self, x: float, y: float, *, sync: bool = True) -> bool:
+        return self._is_model_hit_at(x, y, sync=sync)
+
+    def is_model_opaque_at_local(self, x: float, y: float, *, sync: bool = True) -> bool:
+        if not self._model:
             return False
-        alpha = self._alpha_at(local.x(), local.y(), sync=sync)
+        alpha = self._alpha_at(x, y, sync=sync)
         return bool(alpha is not None and alpha > self._hit_alpha_threshold)
 
     def hit_area_name_at(self, x: float, y: float) -> str:
