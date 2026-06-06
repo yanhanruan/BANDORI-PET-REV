@@ -268,6 +268,8 @@ class ChatWindow(QWidget):
         self._pending_interaction_context = ""
         self._last_user_message_id: int | None = None
         self._last_group_user_message_id: int | None = None
+        self._raw_image_inline_message_id: int | None = None
+        self._raw_image_inline_group_message_id: int | None = None
         self._closing = False
         self._close_animating = False
         self._window_anim = None
@@ -3258,6 +3260,7 @@ class ChatWindow(QWidget):
         self._vision_fallback_worker = None
         self._pending_vision_send = None
         self._hide_plan_divider()
+        self._clear_raw_image_inline_state()
 
         self._stream_flush_timer.stop()
         current_text = (self._visible_stream_text + self._stream_buffer).strip()
@@ -4100,7 +4103,7 @@ class ChatWindow(QWidget):
             note += "\n（内容已截断）"
         return note
 
-    def _chat_message_content(self, text: str, attachments=None):
+    def _chat_message_content(self, text: str, attachments=None, include_raw_images: bool = False):
         items = self._normalize_attachments(attachments)
         if not items:
             return text
@@ -4131,12 +4134,26 @@ class ChatWindow(QWidget):
         for item in items:
             if item.get("type") != "image":
                 continue
+            if not include_raw_images:
+                continue
             if str(item.get("vision_summary", "") or "").strip() or str(item.get("vision_error", "") or "").strip():
                 continue
             data_url = self._image_data_url(item)
             if data_url:
                 parts.append({"type": "image_url", "image_url": {"url": data_url}})
         return parts if len(parts) > 1 else text
+
+    def _attachments_have_raw_images(self, attachments) -> bool:
+        return any(
+            item.get("type") == "image"
+            and not str(item.get("vision_summary", "") or "").strip()
+            and not str(item.get("vision_error", "") or "").strip()
+            for item in self._normalize_attachments(attachments)
+        )
+
+    def _clear_raw_image_inline_state(self):
+        self._raw_image_inline_message_id = None
+        self._raw_image_inline_group_message_id = None
 
     def _aux_vision_fallback_enabled(self) -> bool:
         if not self._cfg or not bool(self._cfg.get("llm_aux_vision_fallback_enabled", False)):
@@ -4363,7 +4380,11 @@ class ChatWindow(QWidget):
             messages.extend(
                 {
                     "role": m["role"],
-                    "content": self._chat_message_content(m["content"], m.get("attachments_json")),
+                    "content": self._chat_message_content(
+                        m["content"],
+                        m.get("attachments_json"),
+                        include_raw_images=m.get("id") == self._raw_image_inline_group_message_id,
+                    ),
                 }
                 for m in history
             )
@@ -4373,7 +4394,11 @@ class ChatWindow(QWidget):
             messages.extend(
                 {
                     "role": m["role"],
-                    "content": self._chat_message_content(m["content"], m.get("attachments_json")),
+                    "content": self._chat_message_content(
+                        m["content"],
+                        m.get("attachments_json"),
+                        include_raw_images=m.get("id") == self._raw_image_inline_message_id,
+                    ),
                 }
                 for m in history
             )
@@ -4702,11 +4727,21 @@ class ChatWindow(QWidget):
         if self._is_group_chat:
             self._last_group_user_message_id = self._db.add_group_message(self._conversation_key, self._ensure_group_conversation_id(), "user", text, attachments=attachments, user_key=self._chat_user_key)
             self._last_user_message_id = None
+            if self._attachments_have_raw_images(attachments):
+                self._raw_image_inline_group_message_id = self._last_group_user_message_id
+                self._raw_image_inline_message_id = None
+            else:
+                self._clear_raw_image_inline_state()
         else:
             if self._conv_id is None:
                 self._conv_id = self._db.create_conversation(self._conversation_key, user_key=self._chat_user_key)
             self._last_user_message_id = self._db.add_message(self._conv_id, "user", text, attachments=attachments)
             self._last_group_user_message_id = None
+            if self._attachments_have_raw_images(attachments):
+                self._raw_image_inline_message_id = self._last_user_message_id
+                self._raw_image_inline_group_message_id = None
+            else:
+                self._clear_raw_image_inline_state()
         self._store_requested_favorite(
             favorite_phrase,
             favorite_source_message,
@@ -4924,6 +4959,7 @@ class ChatWindow(QWidget):
 
     def _start_next_group_response(self):
         if not self._group_queue:
+            self._clear_raw_image_inline_state()
             if self._auto_active:
                 self._composer_hint.setText(
                     _tr("ChatWindow.auto_round_done", default="自动聊天第 {round} 轮完成，准备下一轮...", round=self._auto_round)
@@ -5095,6 +5131,7 @@ class ChatWindow(QWidget):
             else:
                 self._start_next_group_response()
         else:
+            self._clear_raw_image_inline_state()
             self._set_busy(False)
             self._input.setFocus()
             self._sync_input_height()
@@ -5117,6 +5154,7 @@ class ChatWindow(QWidget):
             self._auto_active = False
             self._auto_round = 0
             self._show_local_assistant_message(_tr("ChatWindow.auto_error_stopped", default="自动聊天因错误已停止。"))
+        self._clear_raw_image_inline_state()
         self._set_busy(False)
         self._input.setFocus()
         self._sync_input_height()
