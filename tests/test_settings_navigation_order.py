@@ -1,13 +1,7 @@
 import os
 import unittest
-import warnings
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-warnings.filterwarnings(
-    "ignore",
-    message=r"Failed to disconnect .* from signal .*",
-    category=RuntimeWarning,
-)
 
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
 

@@ -13,8 +13,13 @@ def connect_theme_changed_weak(widget, method_name: str):
     connection = None
 
     def disconnect():
+        nonlocal connection
+        if connection is None:
+            return
+        current_connection = connection
+        connection = None
         try:
-            qconfig.themeChanged.disconnect(connection)
+            qconfig.themeChanged.disconnect(current_connection)
         except (RuntimeError, TypeError):
             try:
                 qconfig.themeChanged.disconnect(invoke)
