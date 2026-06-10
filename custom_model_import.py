@@ -17,7 +17,7 @@ import shutil
 import tempfile
 import time
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from model_manager import MODELS_DIR, ModelManager
 
@@ -98,6 +98,30 @@ def _has_cubism3_artifacts(root: Path) -> bool:
     return False
 
 
+def _resolve_relative_resource(base_dir: Path, resource: str) -> Path:
+    raw = str(resource or "").strip()
+    normalized = raw.replace("\\", "/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or PureWindowsPath(raw).is_absolute()
+        or any(part in {"", ".", ".."} for part in normalized.split("/"))
+    ):
+        raise CustomModelImportError("unsafe_resource_path", resource=raw)
+    base = base_dir.resolve()
+    target = (base / Path(*normalized.split("/"))).resolve()
+    if base != target and base not in target.parents:
+        raise CustomModelImportError("unsafe_resource_path", resource=raw)
+    return target
+
+
+def _require_model_resource(model_dir: Path, resource: str) -> Path:
+    target = _resolve_relative_resource(model_dir, resource)
+    if not target.is_file():
+        raise CustomModelImportError("missing_resource", resource=str(resource))
+    return target
+
+
 def _validate_cubism2_model(model_json: Path) -> None:
     """Validate a single model.json describes a loadable Cubism 2.1 model."""
     try:
@@ -116,15 +140,15 @@ def _validate_cubism2_model(model_json: Path) -> None:
         raise CustomModelImportError("missing_moc")
     if moc.lower().endswith(".moc3"):
         raise CustomModelImportError("cubism3_unsupported")
-    if not (model_json.parent / moc).is_file():
-        raise CustomModelImportError("missing_resource", resource=moc)
+    _require_model_resource(model_json.parent, moc)
 
     textures = data.get("textures", [])
     if not isinstance(textures, list) or not textures:
         raise CustomModelImportError("missing_textures")
     for texture in textures:
-        if not isinstance(texture, str) or not (model_json.parent / texture).is_file():
+        if not isinstance(texture, str):
             raise CustomModelImportError("missing_resource", resource=str(texture))
+        _require_model_resource(model_json.parent, texture)
 
 
 def _sort_webgal_layers(model_jsons: list[Path], source_root: Path) -> list[Path]:
@@ -167,7 +191,7 @@ def _read_existing_composite_layers(source_root: Path, manifest_path: Path) -> l
         relative = str(layer.get("model", "") or "").strip()
         if not relative:
             continue
-        model_json = source_root / relative
+        model_json = _resolve_relative_resource(source_root, relative)
         if model_json.is_file() and _is_model_json(model_json):
             result.append(model_json)
     return result

@@ -1,5 +1,6 @@
 import sys
 import weakref
+import warnings
 
 from PySide6.QtGui import QAction, QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
@@ -18,13 +19,15 @@ def connect_theme_changed_weak(widget, method_name: str):
             return
         current_connection = connection
         connection = None
-        try:
-            qconfig.themeChanged.disconnect(current_connection)
-        except (RuntimeError, TypeError):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
             try:
-                qconfig.themeChanged.disconnect(invoke)
+                qconfig.themeChanged.disconnect(current_connection)
             except (RuntimeError, TypeError):
-                pass
+                try:
+                    qconfig.themeChanged.disconnect(invoke)
+                except (RuntimeError, TypeError):
+                    pass
 
     def invoke():
         obj = widget_ref()

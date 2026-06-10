@@ -59,6 +59,30 @@ BASE_DIR = app_base_dir()
 CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_USER_PROFILE_KEY = "__default__"
 ROLE_USER_KEY_PREFIX = "__role__:"
+CONFIG_TMP_CLEANUP_AGE_SECONDS = 24 * 60 * 60
+
+
+def cleanup_stale_config_temp_files(path: Path, max_age_seconds: int = CONFIG_TMP_CLEANUP_AGE_SECONDS) -> int:
+    path = Path(path)
+    cutoff = time.time() - max(0, int(max_age_seconds))
+    removed = 0
+    try:
+        candidates = list(path.parent.glob(f"{path.name}.*.tmp"))
+    except OSError:
+        return 0
+    for candidate in candidates:
+        try:
+            if not candidate.is_file():
+                continue
+            if candidate.name == path.name or candidate.name == f"{path.name}.lock":
+                continue
+            if candidate.stat().st_mtime > cutoff:
+                continue
+            candidate.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 BUILTIN_LLM_API_PROFILES = [
     {
@@ -500,6 +524,7 @@ class ConfigManager:
         self._path = Path(path)
         self._data = dict(DEFAULTS)
         self._loaded_data = copy.deepcopy(self._data)
+        cleanup_stale_config_temp_files(self._path)
         self.load()
 
     def load(self):
