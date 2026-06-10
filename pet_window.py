@@ -1062,11 +1062,6 @@ class PetWindow(QWidget):
             max(geometry.top(), min(global_pos.y(), geometry.top() + self.height() - 1)),
         )
 
-    def _is_pet_hit_at_global(self, global_pos: QPoint) -> bool:
-        if self._pixel_mode:
-            return self._pixel_widget.is_sprite_hit_at_global(global_pos)
-        return self._live2d_widget.is_model_hit_at_global(global_pos, sync=True)
-
     def _is_pet_opaque_at_global(self, global_pos: QPoint) -> bool:
         if self._pixel_mode:
             return self._pixel_widget.is_sprite_opaque_at_global(global_pos)
