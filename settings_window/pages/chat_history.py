@@ -1,8 +1,9 @@
 import html
 import re
 
-from PySide6.QtCore import QDate, Qt, QTimer
+from PySide6.QtCore import QDate, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QDateEdit,
     QFrame,
     QGridLayout,
@@ -13,13 +14,38 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import ProgressRing
 
 from settings_window.constants import *
 from settings_window.widgets import *
 
 
+class _ChatHistoryWorker(QThread):
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, db_factory, query_params: dict, parent=None):
+        super().__init__(parent)
+        self._db_factory = db_factory
+        self._query_params = query_params
+
+    def run(self):
+        try:
+            db = self._db_factory()
+            params = self._query_params
+            action = params.pop("action", "search")
+            if action == "filters":
+                result = db.get_chat_history_filter_options()
+            else:
+                result = db.search_chat_history(**params)
+            self.finished.emit(result)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class ChatHistoryPageMixin:
     _CHAT_HISTORY_PAGE_SIZE = 100
+    _CHAT_HISTORY_BATCH_SIZE = 20
 
     def _build_chat_history_page(self):
         page = self._make_theme_widget(QWidget())
@@ -209,7 +235,12 @@ class ChatHistoryPageMixin:
         self._history_db = None
         self._history_shown = 0
         self._history_total = 0
+        self._history_has_more = False
         self._history_load_more_button = None
+        self._history_worker = None
+        self._history_filter_cache = None
+        self._history_loading_ring = None
+        self._history_search_generation = 0
         self._history_search_timer = QTimer(page)
         self._history_search_timer.setSingleShot(True)
         self._history_search_timer.setInterval(350)
@@ -231,9 +262,11 @@ class ChatHistoryPageMixin:
 
         self._style_chat_history_page(page)
         self._connect_theme_changed(lambda: self._style_chat_history_page(page))
-        self._populate_chat_history_filters()
-        self._on_history_range_changed()
         return page
+
+    def _activate_chat_history_page(self):
+        self._populate_chat_history_filters(force=False)
+        self._refresh_chat_history()
 
     @staticmethod
     def _make_history_combo(parent, all_text: str):
@@ -268,8 +301,20 @@ class ChatHistoryPageMixin:
             labels[key] = str(profile.get("name", "") or "").strip() or display_user_name(key) or key
         return labels
 
-    def _populate_chat_history_filters(self):
-        options = self._get_history_db().get_chat_history_filter_options()
+    def _populate_chat_history_filters(self, *, force: bool = False):
+        if not force and self._history_filter_cache is not None:
+            self._apply_filter_options(self._history_filter_cache)
+            return
+        self._start_history_worker(
+            {"action": "filters"},
+            on_result=self._on_filter_options_loaded,
+        )
+
+    def _on_filter_options_loaded(self, options):
+        self._history_filter_cache = options
+        self._apply_filter_options(options)
+
+    def _apply_filter_options(self, options):
         selected_character = self._history_character_combo.currentData()
         selected_user = self._history_user_combo.currentData()
 
@@ -474,23 +519,74 @@ class ChatHistoryPageMixin:
         card_layout.addWidget(content)
         self._history_results_layout.addWidget(card)
 
-    def _chat_history_query(self, offset: int = 0) -> dict:
+    def _add_chat_history_records_batch(self, records, keyword: str):
+        batch = self._CHAT_HISTORY_BATCH_SIZE
+        for i, record in enumerate(records):
+            self._add_chat_history_record(record, keyword)
+            if (i + 1) % batch == 0:
+                QApplication.processEvents()
+
+    def _build_chat_history_query_params(self, offset: int = 0, skip_count: bool = False) -> dict:
         date_from, date_to = self._history_date_bounds()
         keyword = self._history_keyword_edit.text().strip()
-        return self._get_history_db().search_chat_history(
-            keyword=keyword,
-            date_from=date_from,
-            date_to=date_to,
-            character=self._history_character_combo.currentData() or "",
-            user_key=self._history_user_combo.currentData() or "",
-            role=self._history_role_combo.currentData() or "",
-            source=self._history_source_combo.currentData() or "",
-            limit=self._CHAT_HISTORY_PAGE_SIZE,
-            offset=offset,
+        return {
+            "action": "search",
+            "keyword": keyword,
+            "date_from": date_from,
+            "date_to": date_to,
+            "character": self._history_character_combo.currentData() or "",
+            "user_key": self._history_user_combo.currentData() or "",
+            "role": self._history_role_combo.currentData() or "",
+            "source": self._history_source_combo.currentData() or "",
+            "limit": self._CHAT_HISTORY_PAGE_SIZE,
+            "offset": offset,
+            "skip_count": skip_count,
+        }
+
+    def _start_history_worker(self, params: dict, *, on_result, on_error=None):
+        if self._history_worker is not None and self._history_worker.isRunning():
+            self._history_worker.finished.disconnect()
+            self._history_worker.error.disconnect()
+            self._history_worker.wait(200)
+        worker = _ChatHistoryWorker(
+            db_factory=lambda: DatabaseManager(),
+            query_params=params,
+            parent=self._history_content,
+        )
+        worker.finished.connect(on_result)
+        worker.error.connect(on_error or self._on_history_query_error)
+        self._history_worker = worker
+        worker.start()
+
+    def _on_history_query_error(self, msg: str):
+        self._hide_history_loading()
+        self._history_summary_label.setText(
+            _tr("SettingsWindow.chat_history_error", default="查询出错：{error}", error=msg)
         )
 
+    def _show_history_loading(self):
+        self._hide_history_loading()
+        ring = ProgressRing(self._history_content)
+        ring.setFixedSize(36, 36)
+        ring.setStrokeWidth(4)
+        ring.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        container = QWidget(self._history_content)
+        container.setObjectName("chatHistoryLoadingContainer")
+        cl = QHBoxLayout(container)
+        cl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cl.setContentsMargins(0, 24, 0, 24)
+        cl.addWidget(ring)
+        self._history_results_layout.addWidget(container)
+        self._history_loading_ring = container
+
+    def _hide_history_loading(self):
+        if self._history_loading_ring is not None:
+            self._history_loading_ring.setParent(None)
+            self._history_loading_ring.deleteLater()
+            self._history_loading_ring = None
+
     def _finish_chat_history_results(self):
-        if self._history_shown < self._history_total:
+        if self._history_has_more:
             self._history_load_more_button = PushButton(
                 _tr("SettingsWindow.chat_history_load_more", default="加载更多"),
                 self._history_content,
@@ -505,21 +601,41 @@ class ChatHistoryPageMixin:
         else:
             self._history_load_more_button = None
         self._history_results_layout.addStretch()
-        self._history_summary_label.setText(_tr(
-            "SettingsWindow.chat_history_result_count",
-            default="找到 {total} 条，当前显示 {shown} 条",
-            total=self._history_total,
-            shown=self._history_shown,
-        ))
+        if self._history_total >= 0:
+            self._history_summary_label.setText(_tr(
+                "SettingsWindow.chat_history_result_count",
+                default="找到 {total} 条，当前显示 {shown} 条",
+                total=self._history_total,
+                shown=self._history_shown,
+            ))
+        else:
+            self._history_summary_label.setText(_tr(
+                "SettingsWindow.chat_history_result_count_approx",
+                default="当前显示 {shown} 条",
+                shown=self._history_shown,
+            ))
 
     def _refresh_chat_history(self, *_args):
         if not hasattr(self, "_history_results_layout"):
             return
-        keyword = self._history_keyword_edit.text().strip()
-        result = self._chat_history_query(offset=0)
+        self._history_search_generation += 1
+        gen = self._history_search_generation
+        params = self._build_chat_history_query_params(offset=0, skip_count=True)
         self._clear_history_results(self._history_results_layout)
+        self._show_history_loading()
+        self._start_history_worker(
+            params,
+            on_result=lambda result, _gen=gen: self._on_refresh_finished(result, _gen),
+        )
+
+    def _on_refresh_finished(self, result, generation):
+        if generation != self._history_search_generation:
+            return
+        self._hide_history_loading()
+        keyword = self._history_keyword_edit.text().strip()
         records = result["records"]
-        self._history_total = result["total"]
+        self._history_total = result.get("total", -1)
+        self._history_has_more = result.get("has_more", False)
         self._history_shown = len(records)
         if not records:
             empty = BodyLabel(
@@ -531,12 +647,11 @@ class ChatHistoryPageMixin:
             empty.setMinimumHeight(120)
             self._history_results_layout.addWidget(empty)
         else:
-            for record in records:
-                self._add_chat_history_record(record, keyword)
+            self._add_chat_history_records_batch(records, keyword)
         self._finish_chat_history_results()
 
     def _load_more_chat_history(self):
-        if self._history_shown >= self._history_total:
+        if not self._history_has_more and self._history_total >= 0 and self._history_shown >= self._history_total:
             return
         if self._history_results_layout.count():
             self._history_results_layout.takeAt(self._history_results_layout.count() - 1)
@@ -545,14 +660,24 @@ class ChatHistoryPageMixin:
             self._history_load_more_button.deleteLater()
             self._history_load_more_button = None
 
+        params = self._build_chat_history_query_params(
+            offset=self._history_shown, skip_count=True,
+        )
+        self._start_history_worker(
+            params,
+            on_result=self._on_load_more_finished,
+        )
+
+    def _on_load_more_finished(self, result):
         keyword = self._history_keyword_edit.text().strip()
-        result = self._chat_history_query(offset=self._history_shown)
-        for record in result["records"]:
-            self._add_chat_history_record(record, keyword)
-        self._history_total = result["total"]
-        self._history_shown += len(result["records"])
-        if not result["records"]:
-            self._history_shown = self._history_total
+        records = result["records"]
+        self._history_total = result.get("total", self._history_total)
+        self._history_has_more = result.get("has_more", False)
+        if records:
+            self._add_chat_history_records_batch(records, keyword)
+            self._history_shown += len(records)
+        else:
+            self._history_has_more = False
         self._finish_chat_history_results()
 
     def _style_chat_history_page(self, page: QWidget):
@@ -588,5 +713,8 @@ class ChatHistoryPageMixin:
             }}
             BodyLabel#chatHistoryEmpty {{
                 color: {muted};
+            }}
+            QWidget#chatHistoryLoadingContainer {{
+                background: transparent;
             }}
         """)

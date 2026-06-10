@@ -1597,8 +1597,7 @@ class SettingsWindow(
             elif nav_key == "memory_album":
                 self._refresh_memory_album_page()
             elif nav_key == "chat_history":
-                self._populate_chat_history_filters()
-                self._refresh_chat_history()
+                QTimer.singleShot(0, self._activate_chat_history_page)
         self._current_page = nav_key
         self._animate_indicator(nav_key)
 

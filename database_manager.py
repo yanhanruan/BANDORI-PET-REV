@@ -1404,6 +1404,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         source: str = "",
         limit: int = 300,
         offset: int = 0,
+        skip_count: bool = False,
     ) -> dict:
         keyword = str(keyword or "").strip()[:500]
         date_from = str(date_from or "").strip()[:10]
@@ -1476,17 +1477,24 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             params.append(source)
 
         where_sql = f" WHERE {' AND '.join(where)}" if where else ""
-        total = self._conn.execute(
-            f"SELECT COUNT(*) FROM ({history_sql}) history{where_sql}",
-            tuple(params),
-        ).fetchone()[0]
+        if skip_count:
+            total = -1
+        else:
+            total = self._conn.execute(
+                f"SELECT COUNT(*) FROM ({history_sql}) history{where_sql}",
+                tuple(params),
+            ).fetchone()[0]
+        probe = limit + 1 if skip_count else limit
         rows = self._conn.execute(
             "SELECT source, source_id, conversation_id, character, group_key, "
             "chat_title, user_key, role, content, created_at "
             f"FROM ({history_sql}) history{where_sql} "
             "ORDER BY created_at DESC, source_id DESC LIMIT ? OFFSET ?",
-            (*params, limit, offset),
+            (*params, probe, offset),
         ).fetchall()
+        has_more = skip_count and len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
         records = []
         for row in rows:
             records.append({
@@ -1503,6 +1511,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             })
         return {
             "total": int(total or 0),
+            "has_more": has_more,
             "records": records,
             "limit": limit,
             "offset": offset,
