@@ -84,6 +84,9 @@ class ChatHistoryDelegate(QStyledItemDelegate):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.hoverRow = -1
+        self.pressedRow = -1
+        self.selectedRows = set()
         self._keyword = ""
         self._colors = {
             "card_bg": "#ffffff",
@@ -93,6 +96,19 @@ class ChatHistoryDelegate(QStyledItemDelegate):
             "highlight_bg": "#facc15",
             "highlight_fg": "#111827",
         }
+
+    def setHoverRow(self, row: int):
+        self.hoverRow = row
+
+    def setPressedRow(self, row: int):
+        self.pressedRow = row
+
+    def setSelectedRows(self, indexes):
+        self.selectedRows.clear()
+        for index in indexes:
+            self.selectedRows.add(index.row())
+            if index.row() == self.pressedRow:
+                self.pressedRow = -1
 
     def set_keyword(self, keyword: str):
         self._keyword = keyword
