@@ -19,6 +19,10 @@ from screen_awareness import (
 )
 
 
+CONFIG_FILE_LOCK_TIMEOUT_SECONDS = 10.0
+CONFIG_FILE_LOCK_RETRY_SECONDS = 0.05
+
+
 def _try_replace_file(src, dst) -> OSError | None:
     try:
         os.replace(src, dst)
@@ -32,15 +36,18 @@ def _config_file_lock(path: Path):
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+b") as lock_file:
+        deadline = time.monotonic() + CONFIG_FILE_LOCK_TIMEOUT_SECONDS
         if os.name == "nt":
             import msvcrt
             while True:
                 try:
                     lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError:
-                    time.sleep(0.05)
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out waiting for config lock: {lock_path}")
+                    time.sleep(CONFIG_FILE_LOCK_RETRY_SECONDS)
             try:
                 yield
             finally:
@@ -48,7 +55,14 @@ def _config_file_lock(path: Path):
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            while True:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out waiting for config lock: {lock_path}")
+                    time.sleep(CONFIG_FILE_LOCK_RETRY_SECONDS)
             try:
                 yield
             finally:
