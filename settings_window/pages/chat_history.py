@@ -1,9 +1,8 @@
 import html
 import re
-from typing import Any
 
 from PySide6.QtCore import QDate, QModelIndex, QRect, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QTextDocument
+from PySide6.QtGui import QColor, QFont, QPainter, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
     QDateEdit,

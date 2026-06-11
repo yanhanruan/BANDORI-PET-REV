@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QTimer
 _log = logging.getLogger(__name__)
 
 from action_bus import publish_lip_sync
+from app_info import APP_NAME
 from chat_config_snapshots import memory_extraction_api_config, tts_config_snapshot
 from database_manager import DatabaseManager
 from i18n_manager import tr as _tr
@@ -41,7 +42,7 @@ from reminder_core import (
 )
 from screen_awareness import ScreenAwarenessVisionWorker, clamp_screen_awareness_interval
 from tts_common import SingleShotTTSCallbacksMixin, strip_tts_action_tags
-from tts_manager import TTSPlayer, TTSRequestWorker
+from tts_manager import TTSPlayer, TTSRequestWorker, is_tts_enabled
 _TTS_AVAILABLE = True
 
 
@@ -427,7 +428,7 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
 
     def _display_name(self, character: str) -> str:
         if not character:
-            return "BandoriPet"
+            return APP_NAME
         try:
             return self._model_manager.get_display_name(character)
         except Exception:
@@ -674,7 +675,7 @@ class ReminderScheduler(SingleShotTTSCallbacksMixin, QObject):
         self._speak_tts_text(text, character)
 
     def _tts_enabled(self) -> bool:
-        return bool(_TTS_AVAILABLE and self._cfg and self._cfg.get("tts_enabled", False))
+        return is_tts_enabled(_TTS_AVAILABLE, self._cfg)
 
     def _clean_tts_payload(self, text: str, character: str) -> str:
         payload = strip_tts_action_tags(text).strip()
