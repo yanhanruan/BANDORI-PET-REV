@@ -2709,6 +2709,8 @@ class PetWindow(QWidget):
         )
 
     def _read_radial_menu_process_output(self, process: QProcess):
+        if not isValid(process):
+            return
         data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
         buffer = self._radial_menu_buffer + data
         lines = buffer.splitlines(keepends=True)
@@ -2720,6 +2722,8 @@ class PetWindow(QWidget):
             self._handle_radial_menu_process_line(raw_line.rstrip("\r\n"))
 
     def _read_radial_menu_process_error(self, process: QProcess):
+        if not isValid(process):
+            return
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
         if data:
             print(data, file=sys.stderr, end="")
@@ -2755,6 +2759,8 @@ class PetWindow(QWidget):
             self._on_lock_toggled(line.split("\t", 1)[1].strip() == "1")
 
     def _on_radial_menu_process_finished(self, process: QProcess):
+        if not isValid(process):
+            return
         was_visible = self._radial_menu_visible
         should_restart = False
         if self._radial_menu_process is process:
@@ -2770,7 +2776,7 @@ class PetWindow(QWidget):
             )
         if was_visible:
             self._broadcast_radial_menu_state(open=False)
-        if self._radial_menu_socket.state() != QLocalSocket.LocalSocketState.UnconnectedState:
+        if isValid(self._radial_menu_socket) and self._radial_menu_socket.state() != QLocalSocket.LocalSocketState.UnconnectedState:
             self._radial_menu_socket.abort()
         process.deleteLater()
         if should_restart:
@@ -3057,6 +3063,8 @@ class PetWindow(QWidget):
         self._compact_ai_window.apply_ai_event(event)
 
     def _read_chat_process_error(self, process: QProcess):
+        if not isValid(process):
+            return
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
         if data:
             try:
@@ -3066,6 +3074,8 @@ class PetWindow(QWidget):
                 print(safe)
 
     def _on_chat_process_finished(self, process: QProcess):
+        if not isValid(process):
+            return
         if self._chat_process is process:
             self._chat_process = None
         try:
@@ -3965,11 +3975,15 @@ class PetWindow(QWidget):
         process.start()
 
     def _read_settings_process_error(self, process: QProcess):
+        if not isValid(process):
+            return
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
         if data:
             print(data)
 
     def _on_settings_process_finished(self, process: QProcess):
+        if not isValid(process):
+            return
         if self._settings_process is process:
             self._settings_process = None
         process.deleteLater()

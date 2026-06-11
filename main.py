@@ -1047,6 +1047,8 @@ def main():
             process.start()
 
     def _read_process_error(process):
+        if not isValid(process):
+            return
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
         if data:
             try:
@@ -1327,16 +1329,16 @@ def main():
 
     app.aboutToQuit.connect(save_config)
     app.aboutToQuit.connect(notify_chat_processes_shutdown)
-    app.aboutToQuit.connect(stop_ipc_server)
     app.aboutToQuit.connect(stop_ai_status_server)
     app.aboutToQuit.connect(stop_chat_integration_server)
     app.aboutToQuit.connect(lambda: stop_napcat_adapter(force=True))
     app.aboutToQuit.connect(stop_reminder_scheduler)
     app.aboutToQuit.connect(close_chat_integration_db)
     app.aboutToQuit.connect(end_usage_session)
-    app.aboutToQuit.connect(lambda: close_settings_process(force=True, wait=False))
-    app.aboutToQuit.connect(lambda: close_chat_process(force=True, wait=False))
-    app.aboutToQuit.connect(lambda: close_pet_processes(force=True, wait=False))
+    app.aboutToQuit.connect(lambda: close_settings_process(force=False, wait=True))
+    app.aboutToQuit.connect(lambda: close_chat_process(force=False, wait=True))
+    app.aboutToQuit.connect(lambda: close_pet_processes(force=False, wait=True))
+    app.aboutToQuit.connect(stop_ipc_server)
 
     if has_configured_models or model_valid:
         pet_window_ref["char"] = char

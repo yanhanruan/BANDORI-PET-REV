@@ -142,6 +142,10 @@ def main():
         pet._live2d_widget.set_drag_locked(True)
         pet._pixel_widget.set_drag_locked(True)
 
+    app.aboutToQuit.connect(lambda: pet._close_radial_menu_process(force=True))
+    app.aboutToQuit.connect(lambda: pet._close_chat_process())
+    app.aboutToQuit.connect(lambda: pet._close_compact_ai_window())
+    app.aboutToQuit.connect(lambda: pet._close_settings_process())
     app.aboutToQuit.connect(lambda: cfg.set("language", current_language()))
     app.aboutToQuit.connect(pet._save_config)
     app.aboutToQuit.connect(pet._flush_save)
