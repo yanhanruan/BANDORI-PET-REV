@@ -1,6 +1,10 @@
 import unittest
 from unittest.mock import patch
 
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import QApplication
+from qfluentwidgets import DatePicker
+
 from settings_window.pages.chat_history import ChatHistoryPageMixin
 
 
@@ -79,6 +83,33 @@ class ChatHistoryFilterWorkerTest(unittest.TestCase):
         self.assertEqual(0, filter_worker.finished.disconnect_count)
         self.assertTrue(filter_worker.started)
         self.assertTrue(harness._history_worker.started)
+
+
+class ChatHistoryDatePickerTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_history_date_filter_uses_fluent_date_picker(self):
+        edit = ChatHistoryPageMixin._make_history_date_edit(None)
+        self.addCleanup(edit.deleteLater)
+
+        self.assertIsInstance(edit, DatePicker)
+        edit.setDate(QDate(2026, 6, 12))
+        self.assertEqual(QDate(2026, 6, 12), edit.date)
+
+    def test_history_date_filter_is_compact_enough_for_grid_cell(self):
+        edit = ChatHistoryPageMixin._make_history_date_edit(None)
+        self.addCleanup(edit.deleteLater)
+        edit.show()
+        self._app.processEvents()
+
+        column_width = sum(
+            child.minimumWidth()
+            for child in edit.children()
+            if hasattr(child, "minimumWidth")
+        )
+        self.assertLessEqual(column_width, 180)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ from PySide6.QtCore import QDate, QModelIndex, QRect, QSize, Qt, QThread, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
-    QDateEdit,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -18,7 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import ListView, ProgressRing
+from qfluentwidgets import DatePicker, ListView, ProgressRing
 
 from settings_window.constants import *
 from settings_window.widgets import *
@@ -624,11 +623,12 @@ class ChatHistoryPageMixin:
 
     @staticmethod
     def _make_history_date_edit(parent):
-        edit = QDateEdit(parent)
-        edit.setCalendarPopup(True)
-        edit.setDisplayFormat("yyyy-MM-dd")
+        edit = DatePicker(parent, format=DatePicker.YYYY_MM_DD)
+        edit.setColumnWidth(0, 66)
+        edit.setColumnWidth(1, 52)
+        edit.setColumnWidth(2, 52)
         edit.setFixedHeight(36)
-        edit.setMinimumWidth(110)
+        edit.setMinimumWidth(170)
         edit.setDate(QDate.currentDate())
         return edit
 
@@ -711,7 +711,7 @@ class ChatHistoryPageMixin:
             elif mode == "30d":
                 start = today.addDays(-29)
             else:
-                start = self._history_start_date.date()
+                start = self._history_start_date.date
             self._history_start_date.blockSignals(True)
             self._history_end_date.blockSignals(True)
             self._history_start_date.setDate(start)
@@ -728,8 +728,8 @@ class ChatHistoryPageMixin:
         mode = self._history_range_combo.currentData() or "all"
         if mode == "all":
             return "", ""
-        start = self._history_start_date.date()
-        end = self._history_end_date.date()
+        start = self._history_start_date.date
+        end = self._history_end_date.date
         if start > end:
             start, end = end, start
         return start.toString("yyyy-MM-dd"), end.toString("yyyy-MM-dd")
