@@ -2132,6 +2132,7 @@ class PetWindow(QWidget):
         if "model_action_settings" in data and self._cfg:
             self._cfg.set("model_action_settings", data["model_action_settings"])
         if "models" in data and self._cfg:
+            self._settings_models_updated = True
             next_group_characters = self._chat_group_characters_from_models(data["models"])
             if next_group_characters:
                 self._group_characters = next_group_characters
@@ -4005,6 +4006,7 @@ class PetWindow(QWidget):
                 and not self._startup_position_restore_pending
                 and not self._restoring_saved_position
             )
+            skip_model_sync = bool(getattr(self, "_settings_models_updated", False))
             models = self._cfg.get("models", [])
             configured_model_count = self._configured_model_count()
             model_exists = (
@@ -4017,7 +4019,7 @@ class PetWindow(QWidget):
             )
             self._cfg.set("language", current_language())
             path = self._model_manager.get_model_json_path(self._current_char, self._current_costume)
-            if model_exists:
+            if model_exists and not skip_model_sync:
                 if configured_model_count <= 1:
                     self._cfg.set("character", self._current_char)
                     self._cfg.set("costume", self._current_costume)
@@ -4034,7 +4036,7 @@ class PetWindow(QWidget):
             self._cfg.set("live2d_hit_alpha_threshold", self._live2d_hit_alpha_threshold)
             self._cfg.set("live2d_lip_sync_max_open", self._live2d_lip_sync_max_open)
             self._cfg.set("drag_locked", self._live2d_widget._drag_locked)
-            if model_exists:
+            if model_exists and not skip_model_sync:
                 if configured_model_count <= 1:
                     self._cfg.set("pet_mode", "pixel" if self._pixel_mode else "live2d")
                     if self._pixel_mode and save_position:
@@ -4047,6 +4049,8 @@ class PetWindow(QWidget):
                         self._cfg.set("window_width", self.width())
                         self._cfg.set("window_height", self.height())
                         self._cfg.set("window_placement", self._window_placement())
+            if skip_model_sync:
+                self._settings_models_updated = False
             self._cfg.save()
 
     def _flush_save(self):
