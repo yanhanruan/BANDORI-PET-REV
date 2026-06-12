@@ -123,7 +123,7 @@ def main():
         settings_action = menu.addAction(_tr("MainTray.settings"))
         settings_action.triggered.connect(lambda: launch_settings_process(show_launch=False))
         exit_action = menu.addAction(_tr("MainTray.exit"))
-        exit_action.triggered.connect(quit_all)
+        exit_action.triggered.connect(lambda: QTimer.singleShot(0, quit_all))
         tray_icon.setContextMenu(menu)
         tray_icon.activated.connect(on_tray_activated)
         tray_ref["menu"] = menu
@@ -143,7 +143,11 @@ def main():
         quit_ref["running"] = True
         if tray_icon is not None:
             tray_icon.hide()
-        app.quit()
+
+        notify_child_processes_shutdown()
+        close_settings_process(force=False, wait=False)
+        close_chat_process(force=False, wait=False)
+        close_pet_processes(force=False, wait=False)
 
         # Safety net: if the aboutToQuit handlers block or the event loop
         # stalls, force-terminate after a short delay so the process never
@@ -151,7 +155,8 @@ def main():
         def _force_exit():
             os._exit(0)
 
-        QTimer.singleShot(10_000, _force_exit)
+        QTimer.singleShot(1500, _force_exit)
+        QTimer.singleShot(50, app.quit)
 
     def init_ipc_server():
         name = ipc_server_name()
@@ -748,7 +753,7 @@ def main():
             if line.startswith("SETTINGS\t"):
                 broadcast_ipc_line(line, exclude_socket=source_socket)
 
-    def notify_chat_processes_shutdown():
+    def notify_child_processes_shutdown():
         with ipc_ref["lock"]:
             sockets = list(ipc_ref.get("clients", []))
         for socket in sockets:
@@ -756,7 +761,6 @@ def main():
                 continue
             socket.write(b"SHUTDOWN\n")
             socket.flush()
-            socket.waitForBytesWritten(100)
 
     def configured_models():
         models = cfg.get("models", [])
@@ -815,7 +819,7 @@ def main():
                         if isValid(p) and p.state() != QProcess.ProcessState.NotRunning:
                             p.kill()
 
-                    QTimer.singleShot(1500, kill_if_still_running)
+                    QTimer.singleShot(800, kill_if_still_running)
                     return
                 if not process.waitForFinished(1000):
                     process.kill()
@@ -1328,7 +1332,7 @@ def main():
     usage_heartbeat.start()
 
     app.aboutToQuit.connect(save_config)
-    app.aboutToQuit.connect(notify_chat_processes_shutdown)
+    app.aboutToQuit.connect(notify_child_processes_shutdown)
     app.aboutToQuit.connect(stop_ai_status_server)
     app.aboutToQuit.connect(stop_chat_integration_server)
     app.aboutToQuit.connect(lambda: stop_napcat_adapter(force=True))
@@ -1336,7 +1340,7 @@ def main():
     app.aboutToQuit.connect(close_chat_integration_db)
     app.aboutToQuit.connect(end_usage_session)
     app.aboutToQuit.connect(lambda: close_settings_process(force=False, wait=False))
-    app.aboutToQuit.connect(lambda: close_chat_process(force=True, wait=False))
+    app.aboutToQuit.connect(lambda: close_chat_process(force=False, wait=False))
     app.aboutToQuit.connect(lambda: close_pet_processes(force=False, wait=False))
     app.aboutToQuit.connect(stop_ipc_server)
 

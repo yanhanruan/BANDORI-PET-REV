@@ -208,7 +208,7 @@ def main():
             shutdown_buffer["text"] = ""
         for line in (item.rstrip("\r\n") for item in lines):
             if line == "SHUTDOWN":
-                window.close()
+                window.request_immediate_shutdown()
                 break
             if line == "FOCUS_CHAT":
                 focus_window()

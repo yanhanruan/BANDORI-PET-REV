@@ -20,7 +20,7 @@ BASE_DIR = str(app_base_dir())
 _STARTUP_CONFIG = ConfigManager()
 configure_qt_opengl_environment(is_gpu_acceleration_enabled(_STARTUP_CONFIG))
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalSocket
 from PySide6.QtWidgets import QApplication
@@ -165,6 +165,8 @@ def main():
                 parts = line.split("\t", 1)
                 character = parts[1].strip() if len(parts) == 2 else ""
                 window.show_costume_picker(character)
+            elif line == "SHUTDOWN":
+                QTimer.singleShot(0, window.close)
 
     ipc_socket.readyRead.connect(on_ipc_ready)
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)

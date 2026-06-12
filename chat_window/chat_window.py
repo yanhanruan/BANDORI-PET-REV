@@ -379,6 +379,7 @@ class ChatWindow(ChatWindowMixin, QWidget):
         self._raw_image_inline_message_id: int | None = None
         self._raw_image_inline_group_message_id: int | None = None
         self._closing = False
+        self._immediate_shutdown = False
         self._close_animating = False
         self._window_anim = None
         self._pending_history_menu_action = None
@@ -836,6 +837,15 @@ class ChatWindow(ChatWindowMixin, QWidget):
     def _finish_animated_close(self):
         self._closing = True
         self._close_animating = False
+        self.close()
+
+    def request_immediate_shutdown(self):
+        self._immediate_shutdown = True
+        self._closing = True
+        self._close_animating = False
+        self._close_waiting_for_workers = False
+        if self._window_anim is not None:
+            self._window_anim.stop()
         self.close()
 
     def _init_ui(self):
@@ -6074,23 +6084,26 @@ class ChatWindow(ChatWindowMixin, QWidget):
             if worker.isRunning():
                 worker.requestInterruption()
                 workers_to_wait.append(worker)
-        deadline = time.monotonic() + 1.5
-        for worker in workers_to_wait:
-            remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                break
-            worker.wait(min(remaining_ms, 250))
-        still_running = [worker for worker in workers_to_wait if worker is not None and worker.isRunning()]
-        if still_running:
-            event.ignore()
-            self._close_waiting_for_workers = True
-            self.setEnabled(False)
-            def retry_close():
-                self._close_waiting_for_workers = False
-                if self._closing:
-                    self.close()
-            QTimer.singleShot(1000, retry_close)
-            return
+        if self._immediate_shutdown:
+            self._close_waiting_for_workers = False
+        else:
+            deadline = time.monotonic() + 1.5
+            for worker in workers_to_wait:
+                remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
+                if remaining_ms <= 0:
+                    break
+                worker.wait(min(remaining_ms, 250))
+            still_running = [worker for worker in workers_to_wait if worker is not None and worker.isRunning()]
+            if still_running:
+                event.ignore()
+                self._close_waiting_for_workers = True
+                self.setEnabled(False)
+                def retry_close():
+                    self._close_waiting_for_workers = False
+                    if self._closing:
+                        self.close()
+                QTimer.singleShot(1000, retry_close)
+                return
         self._cancelled_workers.clear()
         self._memory_workers.clear()
         self._stream_flush_timer.stop()
