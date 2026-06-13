@@ -35,6 +35,7 @@ from token_usage import (
     merge_token_usage,
     normalize_token_usage,
 )
+from character_persona_manager import active_character_persona_prompt
 
 
 # ── 12 个公共基础动作标签（所有角色共有） ──
@@ -483,7 +484,9 @@ def build_system_prompt(character: str, config_manager=None) -> str:
 
     prompt += "\n\n" + COMMON_RULES
 
-    md_prompt = _get_character_md_prompt(character)
+    md_prompt = active_character_persona_prompt(config_manager, character) if config_manager else ""
+    if not md_prompt:
+        md_prompt = _get_character_md_prompt(character)
     if md_prompt:
         prompt = md_prompt + "\n\n" + prompt
 

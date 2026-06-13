@@ -1007,6 +1007,8 @@ def main():
             "pov_custom_prompt",
             "pov_custom_personas",
             "pov_role_character",
+            "character_persona_presets",
+            "character_persona_active",
             "model_action_settings",
             "models",
             "alarms",

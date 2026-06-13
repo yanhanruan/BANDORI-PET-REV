@@ -324,6 +324,8 @@ DEFAULTS = {
     "pov_custom_prompt": "",
     "pov_custom_personas": [],
     "pov_role_character": "",
+    "character_persona_presets": {},
+    "character_persona_active": {},
     "llm_enable_thinking": None,
     "llm_show_reasoning": True,
     "compact_ai_window_enabled": False,

@@ -186,6 +186,7 @@ DATA_CATEGORY_LLM = "llm"
 DATA_CATEGORY_TTS = "tts"
 DATA_CATEGORY_ASR = "asr"
 DATA_CATEGORY_POV = "pov"
+DATA_CATEGORY_CHARACTER_PERSONA = "character_persona"
 DATA_CATEGORY_RELATIONSHIP = "relationship"
 DATA_CATEGORY_REMINDERS = "reminders"
 DATA_CATEGORY_SCREEN_AWARENESS = "screen_awareness"
@@ -278,6 +279,10 @@ DATA_CONFIG_KEYS = {
         "pov_role_character",
         "user_profiles",
         "active_user_profile",
+    ),
+    DATA_CATEGORY_CHARACTER_PERSONA: (
+        "character_persona_presets",
+        "character_persona_active",
     ),
     DATA_CATEGORY_REMINDERS: (
         "alarms",
@@ -384,6 +389,7 @@ DATA_EXPORT_ORDER = (
     DATA_CATEGORY_TTS,
     DATA_CATEGORY_ASR,
     DATA_CATEGORY_POV,
+    DATA_CATEGORY_CHARACTER_PERSONA,
     DATA_CATEGORY_RELATIONSHIP,
     DATA_CATEGORY_REMINDERS,
     DATA_CATEGORY_SCREEN_AWARENESS,

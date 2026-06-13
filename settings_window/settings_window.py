@@ -26,6 +26,7 @@ from settings_window.pages.about import AboutPageMixin
 from settings_window.pages.behavior import BehaviorPageMixin
 from settings_window.pages.statistics import StatisticsPageMixin
 from settings_window.pages.chat_history import ChatHistoryPageMixin
+from settings_window.pages.character_persona import CharacterPersonaPageMixin
 
 
 class SettingsWindow(
@@ -46,6 +47,7 @@ class SettingsWindow(
     BehaviorPageMixin,
     StatisticsPageMixin,
     ChatHistoryPageMixin,
+    CharacterPersonaPageMixin,
     QWidget,
 ):
 
@@ -119,6 +121,7 @@ class SettingsWindow(
         self._tts_page = None
         self._asr_page = None
         self._pov_page = None
+        self._character_persona_page = None
         self._memory_page = None
         self._memory_album_page = None
         self._relationship_guide_page = None
@@ -1276,6 +1279,12 @@ class SettingsWindow(
         if key in {"llm", "pov"}:
             self._ensure_llm_and_pov_pages()
             return self._pages.get(key)
+        if key == "character_persona":
+            self._character_persona_page = self._add_lazy_page(
+                "character_persona",
+                self._build_character_persona_page(),
+            )
+            return self._character_persona_page
         if key == "tts":
             self._tts_page = self._add_lazy_page("tts", self._build_tts_page())
             return self._tts_page
@@ -1531,6 +1540,17 @@ class SettingsWindow(
         btn_pov.nav_activated.connect(self._on_nav_selected)
         self._nav_buttons["pov"] = btn_pov
         nav_layout.addWidget(btn_pov)
+
+        btn_character_persona = NavButton(
+            "character_persona",
+            "avatar",
+            _tr("SettingsWindow.nav_character_persona", default="角色人格"),
+            nav_content,
+            "#d946ef",
+        )
+        btn_character_persona.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["character_persona"] = btn_character_persona
+        nav_layout.addWidget(btn_character_persona)
 
         btn_chat_integration = NavButton(
             "chat_integration",

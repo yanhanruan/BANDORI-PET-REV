@@ -38,6 +38,11 @@ class DataManagementPageMixin:
                 _tr("SettingsWindow.data_category_pov_desc", default="POV 模式、自定义提示词、角色扮演对象和保存的人设。"),
             ),
             (
+                DATA_CATEGORY_CHARACTER_PERSONA,
+                _tr("SettingsWindow.data_category_character_persona", default="角色人格"),
+                _tr("SettingsWindow.data_category_character_persona_desc", default="每个角色的自定义人格文档预设和当前启用项。"),
+            ),
+            (
                 DATA_CATEGORY_RELATIONSHIP,
                 _tr("SettingsWindow.data_category_relationship", default="好感度与记忆"),
                 _tr("SettingsWindow.data_category_relationship_desc", default="角色关系状态和长期记忆。"),
@@ -882,6 +887,8 @@ class DataManagementPageMixin:
             self._load_screen_awareness_controls()
         if self._memory_page_ready() and DATA_CATEGORY_RELATIONSHIP in imported_sections:
             self._refresh_memory_page()
+        if DATA_CATEGORY_CHARACTER_PERSONA in imported_sections and hasattr(self, "_character_persona_character"):
+            self._reload_character_persona_page()
         self._refresh_side_and_quality_widgets()
         if DATA_CATEGORY_MISC in imported_sections and hasattr(self, "_auto_start_switch"):
             self._apply_auto_start_setting()
