@@ -387,6 +387,42 @@ def _build_key_to_name_mapping() -> dict[str, str]:
     return {key: info.get("display", key) for key, info in chars.items()}
 
 
+def _unknown_character_display_name(character: str, config_manager=None) -> str:
+    character = str(character or "").strip()
+    key_to_name = _build_key_to_name_mapping()
+    if character in key_to_name:
+        return key_to_name[character] or character
+    if config_manager:
+        models = config_manager.get("models", [])
+        if isinstance(models, list):
+            for model in models:
+                if not isinstance(model, dict) or model.get("character") != character:
+                    continue
+                return character
+    return character or "未知角色"
+
+
+def _unknown_character_prompt(character: str, config_manager=None) -> str:
+    display_name = _unknown_character_display_name(character, config_manager)
+    return _make_prompt(
+        (
+            f"角色名：{display_name}。"
+            "请根据这个角色名自行查询和理解该角色的人物设定、说话风格与行为方式。"
+            "如果信息不足，请保持你的默认设定。"
+        ),
+        _CORE_TAGS,
+    )
+
+
+def default_character_persona_prompt(character: str, config_manager=None) -> str:
+    md_prompt = _get_character_md_prompt(character)
+    if md_prompt:
+        return md_prompt
+    if character in CHARACTER_PROMPTS:
+        return ""
+    return _unknown_character_prompt(character, config_manager)
+
+
 def _character_prompt_cache_token() -> tuple[tuple[str, int, int], ...]:
     paths = []
     if _OUTFIT_JSON_PATH.exists():
@@ -472,11 +508,19 @@ def _build_event_context(current_character: str = "") -> str:
 
 
 def build_system_prompt(character: str, config_manager=None) -> str:
-    base = CHARACTER_PROMPTS.get(character, CHARACTER_PROMPTS.get("anon", ""))
-    if not base:
+    custom_character_persona = active_character_persona_prompt(config_manager, character) if config_manager else ""
+    known_character = character in CHARACTER_PROMPTS
+    if known_character:
+        prompt = CHARACTER_PROMPTS.get(character, "")
+    elif custom_character_persona:
+        prompt = custom_character_persona
+    else:
+        prompt = _unknown_character_prompt(character, config_manager)
+    if not prompt:
         return ""
 
-    prompt = base
+    if not known_character and custom_character_persona:
+        prompt += f"\n\n【重要指令】：必须在最后加动作标签：{_CORE_TAGS}"
 
     event_context = _build_event_context(character)
     if event_context:
@@ -484,9 +528,9 @@ def build_system_prompt(character: str, config_manager=None) -> str:
 
     prompt += "\n\n" + COMMON_RULES
 
-    md_prompt = active_character_persona_prompt(config_manager, character) if config_manager else ""
-    if not md_prompt:
-        md_prompt = _get_character_md_prompt(character)
+    md_prompt = ""
+    if known_character:
+        md_prompt = custom_character_persona or _get_character_md_prompt(character)
     if md_prompt:
         prompt = md_prompt + "\n\n" + prompt
 

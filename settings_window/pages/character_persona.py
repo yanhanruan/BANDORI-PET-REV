@@ -9,7 +9,7 @@ from character_persona_manager import (
     now_iso,
     persona_title_from_prompt,
 )
-from llm_manager import _get_character_md_prompt
+from llm_manager import default_character_persona_prompt
 from settings_window.constants import *
 from settings_window.widgets import *
 from settings_window.workers import *
@@ -222,7 +222,9 @@ class CharacterPersonaPageMixin:
         self._character_persona_preset.setCurrentIndex(selected_index)
         self._character_persona_preset.blockSignals(False)
 
-        self._character_persona_default_preview.setPlainText(_get_character_md_prompt(character))
+        self._character_persona_default_preview.setPlainText(
+            default_character_persona_prompt(character, self._cfg)
+        )
         selected_preset_id = active_id if selected_index > 0 else ""
         self._set_character_persona_default_preview_visible(not selected_preset_id)
         self._load_character_persona_editor(character, selected_preset_id)
