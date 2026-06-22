@@ -91,6 +91,18 @@ def _app_icon_path() -> str:
     return icon_path if os.path.exists(icon_path) else ""
 
 
+def focus_chat_window(window):
+    prepare_for_reopen = getattr(window, "prepare_for_reopen", None)
+    if callable(prepare_for_reopen):
+        prepare_for_reopen()
+    if window.isMinimized():
+        window.showNormal()
+    else:
+        window.show()
+    window.raise_()
+    window.activateWindow()
+
+
 def _ensure_taskbar_icon_identity(app_id: str) -> bool:
     if sys.platform != "win32":
         return True
@@ -190,12 +202,7 @@ def main():
     ipc = {"inbound": None, "broadcast": None}
 
     def focus_window():
-        if window.isMinimized():
-            window.showNormal()
-        else:
-            window.show()
-        window.raise_()
-        window.activateWindow()
+        focus_chat_window(window)
 
     def attach_ipc_queues() -> bool:
         try:

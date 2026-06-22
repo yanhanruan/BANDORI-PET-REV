@@ -1135,6 +1135,7 @@ def main():
     def launch_chat_process():
         existing = chat_process_ref.get("process")
         if existing is not None and existing.state() != QProcess.ProcessState.NotRunning:
+            broadcast_ipc_line("FOCUS_CHAT")
             return
 
         cfg.load()

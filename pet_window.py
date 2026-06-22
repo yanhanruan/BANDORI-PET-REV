@@ -2917,6 +2917,7 @@ class PetWindow(QWidget):
 
     def _open_chat(self):
         if self._chat_process is not None and self._chat_process.state() != QProcess.ProcessState.NotRunning:
+            self._send_ipc("FOCUS_CHAT")
             return
 
         base_dir = str(app_base_dir())

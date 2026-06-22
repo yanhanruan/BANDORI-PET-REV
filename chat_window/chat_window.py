@@ -849,6 +849,18 @@ class ChatWindow(ChatWindowMixin, QWidget):
             self._window_anim.stop()
         self.close()
 
+    def prepare_for_reopen(self):
+        if self._window_anim is not None:
+            try:
+                self._window_anim.stop()
+            except RuntimeError:
+                pass
+        self._closing = False
+        self._close_animating = False
+        self._close_waiting_for_workers = False
+        self.setEnabled(True)
+        self.setWindowOpacity(1.0)
+
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
