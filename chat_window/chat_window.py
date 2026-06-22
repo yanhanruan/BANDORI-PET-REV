@@ -102,6 +102,7 @@ from .constants import (
     _prepare_rounded_menu,
 )
 from .avatar_utils import _rounded_avatar_pixmap
+from .scrollbar_style import fluent_scrollbar_style
 from .widgets import (
     AuxVisionFallbackWorker, GroupRenameDialog,
     RoundedPanel, IconButton, ChatSendButton,
@@ -2132,18 +2133,7 @@ class ChatWindow(ChatWindowMixin, QWidget):
                 QWidget#GroupList {{
                     background: {sidebar_bg};
                 }}
-                QScrollBar:vertical {{
-                    background: {sidebar_bg};
-                    width: 6px;
-                }}
-                QScrollBar::handle:vertical {{
-                    background: {'#4c5569' if dark else '#c7d0e3'};
-                    border-radius: 3px;
-                    min-height: 30px;
-                }}
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                    height: 0px;
-                }}
+                {fluent_scrollbar_style("QScrollArea#GroupListScroll", sidebar_bg, dark=dark)}
             """)
             for i in range(self._group_list_layout.count()):
                 item = self._group_list_layout.itemAt(i)
@@ -2208,18 +2198,7 @@ class ChatWindow(ChatWindowMixin, QWidget):
             QWidget#MessageArea {{
                 background: {scroll_bg};
             }}
-            QScrollBar:vertical {{
-                background: {scroll_bg};
-                width: 6px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {'#4c5569' if dark else '#c7d0e3'};
-                border-radius: 3px;
-                min-height: 30px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
+            {fluent_scrollbar_style("", scroll_bg, dark=dark)}
         """)
         self._scroll.viewport().setStyleSheet(f"background: {scroll_bg};")
 
@@ -2276,8 +2255,6 @@ class ChatWindow(ChatWindowMixin, QWidget):
         self._msg_layout.addStretch()
 
     def _history_scroll_style(self, bg: str, dark: bool) -> str:
-        handle = "#566074" if dark else "#c4cfe3"
-        handle_hover = "#69758d" if dark else "#aebbd4"
         return f"""
             QScrollArea#ConversationHistoryScroll {{
                 background: {bg};
@@ -2289,27 +2266,7 @@ class ChatWindow(ChatWindowMixin, QWidget):
             QWidget#ConversationHistoryList {{
                 background: {bg};
             }}
-            QScrollArea#ConversationHistoryScroll QScrollBar:vertical {{
-                background: {bg};
-                width: 8px;
-                margin: 4px 0px 4px 0px;
-            }}
-            QScrollArea#ConversationHistoryScroll QScrollBar::handle:vertical {{
-                background: {handle};
-                border-radius: 4px;
-                min-height: 30px;
-            }}
-            QScrollArea#ConversationHistoryScroll QScrollBar::handle:vertical:hover {{
-                background: {handle_hover};
-            }}
-            QScrollArea#ConversationHistoryScroll QScrollBar::add-line:vertical,
-            QScrollArea#ConversationHistoryScroll QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollArea#ConversationHistoryScroll QScrollBar::add-page:vertical,
-            QScrollArea#ConversationHistoryScroll QScrollBar::sub-page:vertical {{
-                background: transparent;
-            }}
+            {fluent_scrollbar_style("QScrollArea#ConversationHistoryScroll", bg, dark=dark)}
         """
 
     def _fit_history_menu_widgets(self, menu: QMenu, rows: list[ConversationHistoryRow], scrolls: list[QScrollArea]):

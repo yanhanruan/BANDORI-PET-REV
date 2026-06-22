@@ -31,6 +31,7 @@ from app_theme import (
 from vision_fallback import analyze_images_with_aux_model
 
 from .constants import _HISTORY_ROW_WIDTH, _HISTORY_ROW_HEIGHT, _prepare_fluent_round_menu
+from .scrollbar_style import fluent_scrollbar_style
 
 
 class AuxVisionFallbackWorker(QThread):
@@ -1047,7 +1048,6 @@ class ChatCharacterPickerPanel(QWidget):
         button_bg = accent_color(dark)
         button_hover = BANDORI_PRIMARY_DARK_HOVER if dark else BANDORI_PRIMARY_HOVER
         button_pressed = BANDORI_PRIMARY_DARK_PRESSED if dark else BANDORI_PRIMARY_PRESSED
-        handle = "#4c5569" if dark else "#c7d0e3"
         self.setStyleSheet(f"""
             QWidget#ChatCharacterPickerPanel {{
                 background: {bg};
@@ -1115,18 +1115,7 @@ class ChatCharacterPickerPanel(QWidget):
                 background: {'#2a2f3b' if dark else '#e6ebf3'};
                 color: {muted};
             }}
-            QScrollBar:vertical {{
-                background: {bg};
-                width: 6px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {handle};
-                border-radius: 3px;
-                min-height: 30px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
+            {fluent_scrollbar_style("QScrollArea#ChatPickerScroll", bg, dark=dark, width=6)}
         """)
         for row in self._picker_rows:
             row.set_checked_bg(hover)
